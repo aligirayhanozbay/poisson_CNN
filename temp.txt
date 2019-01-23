@@ -1,0 +1,18 @@
+input_0 = Input(shape=(1,ntest,ntest,))
+conv_1_0 = Conv2D(filters = 2, kernel_size = 3, activation=tf.nn.relu, data_format='channels_first', padding='same')(input_0)
+
+conv_2_0 = Conv2D(filters = 8, kernel_size = 3, activation=tf.nn.relu, data_format='channels_first', padding='same')(conv_1_0)
+pool_2_0 = AveragePooling2D(data_format = 'channels_first')(conv_2_0)
+pool_2_1 = AveragePooling2D(data_format = 'channels_first')(pool_2_0)
+
+conv_3_0 = Conv2D(filters = 8, kernel_size = 3, activation=tf.nn.relu, data_format = 'channels_first', padding='same')(conv_2_0)
+conv_3_1 = Conv2D(filters = 8, kernel_size = 3, activation=tf.nn.relu, data_format = 'channels_first', padding='same')(pool_2_0)
+conv_3_2 = Conv2D(filters = 8, kernel_size = 3, activation=tf.nn.relu, data_format = 'channels_first', padding='same')(pool_2_1)
+transposeconv_3_1 = Conv2DTranspose(filters = 8, kernel_size = 3, strides = 2, activation = tf.nn.relu, data_format = 'channels_first', padding='same')(conv_3_1)
+transposeconv_3_2 = Conv2DTranspose(filters = 8, kernel_size = 3, strides = 4, activation = tf.nn.relu, data_format = 'channels_first', padding='same')(conv_3_2)
+merge_3_0 = Add()([conv_3_0, transposeconv_3_1, transposeconv_3_2])
+
+conv_4_0 = Conv2D(filters = 8, kernel_size = 1, activation = tf.nn.relu, data_format = 'channels_first', padding='same')(merge_3_0)
+
+conv_5_0 = Conv2D(filters = 1, kernel_size = 1, activation = tf.nn.tanh, data_format = 'channels_first', padding='same')(conv_4_0)
+a = Model(input_0, conv_5_0)
