@@ -9,7 +9,7 @@ from collections.abc import Iterable
 import itertools, h5py, os, sys, time
 from multiprocessing import Pool as ThreadPool
 from Lp_integral_norm import Lp_integral_norm
-opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
+opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)
 conf = tf.ConfigProto(gpu_options=opts)
 tfe.enable_eager_execution(config=conf)
 tf.keras.backend.set_floatx('float64')
@@ -84,9 +84,9 @@ def generate_random_RHS(n, n_controlpts = None, n_outputpts = None, s = 5, domai
             
     out = []
     for i in range(n):
-        spl = RectBivariateSpline(x,y,np.random.rand(len(x), len(y)),s=s) #modify 3rd argument to pick RHS. np.random.rand(len(x), len(y)) is for random. 2*(i/n)*np.ones((len(x), len(y)), dtype = tf.keras.backend.floatx())-1
+        spl = RectBivariateSpline(x,y,2*np.random.rand(len(x), len(y))-1,s=s) #modify 3rd argument to pick RHS. np.random.rand(len(x), len(y)) is for random. 2*(i/n)*np.ones((len(x), len(y)), dtype = tf.keras.backend.floatx())-1
         v = spl(x_out,y_out)
-        out.append((v-np.min(v))/(np.max(v)-np.min(v)))
+        out.append(2*(v-np.min(v))/(np.max(v)-np.min(v))-1)
     return np.array(out)
     
 
@@ -125,9 +125,9 @@ def generate_dataset(batch_size, n, h, boundaries, n_batches = 1, rhs_range = [-
         return tf.map_fn(chol, rhs)
     
     #pdb.set_trace()
-    pool = ThreadPool(n_batches)
-    F = pool.map(generate_random_RHS, zip(itertools.repeat(batch_size, n_batches), itertools.repeat(10), itertools.repeat(n), itertools.repeat(5), itertools.repeat([0,n*h,0,n*h])))
-    rhs = tf.concat(pool.map(poisson_RHS, zip(F, itertools.repeat(boundaries), itertools.repeat(h))), axis=0)
+    with ThreadPool(n_batches) as pool:
+        F = pool.map(generate_random_RHS, zip(itertools.repeat(batch_size, n_batches), itertools.cycle(np.arange(5, 5 + n_batches//2)), itertools.repeat(n), itertools.repeat(5), itertools.repeat([0,n*h,0,n*h])))
+        rhs = tf.concat(pool.map(poisson_RHS, zip(F, itertools.repeat(boundaries), itertools.repeat(h))), axis=0)
     print('RHSes generated.')
     
     soln = np.zeros((n_batches * batch_size, n, n), dtype = np.float64)
@@ -165,3 +165,7 @@ with h5py.File(outputpath, 'w') as hf:
     hf.create_dataset('soln', data=soln)
     hf.create_dataset('F', data=F)
 print('Data saved.')
+print('Max RHS  : ' + str(tf.reduce_max(F)))
+print('Min RHS  : ' + str(tf.reduce_min(F)))
+print('Max soln : ' + str(tf.reduce_max(soln)))
+print('Min soln : ' + str(tf.reduce_min(soln)))
