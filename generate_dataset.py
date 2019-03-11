@@ -149,7 +149,7 @@ _, outputpath, ntest, h, batch_size, n_batches = sys.argv
 ntest = int(ntest)
 h = float(h)
 batch_size = int(batch_size)
-n_batches = int(batch_size)
+n_batches = int(n_batches)
 
 folder = 'dataset_' + str(ntest)
 boundary_top = Boundary1D('Dirichlet', [(0,ntest*h),(ntest*h,ntest*h)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
