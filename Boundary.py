@@ -26,8 +26,9 @@ class Boundary1D:
             boundary_rhs_is_parametric  : determines if a parametric function g(t) or a 'regular' function g(x,y) is specified as the rhs of the boundary
     '''
     
-    def __init__(self, boundary_type, coordinates, error_type = 'L2', RHS_function = lambda x: 0, label = None, robin_bc_alpha = None, interpolation_order = 1, orientation = 'counterclockwise', derivative_regularizer_coefficient = 0.0, boundary_rhs_is_parametric = False, n_threads = 8):
+    def __init__(self, boundary_type, coordinates, error_type = 'L2', RHS_function = lambda x: 0, label = None, robin_bc_alpha = None, interpolation_order = 1, orientation = 'counterclockwise', derivative_regularizer_coefficient = 0.0, boundary_rhs_is_parametric = False, n_threads = 8, dtype = 'float64'):
         
+        self.dtype = dtype
         self.error_type = error_type
         self.orientation = orientation
         self.boundary_type = boundary_type
@@ -73,7 +74,7 @@ class Boundary1D:
          x = self.x_interpolant(t_values)
          y = self.y_interpolant(t_values)
          
-         self.last_used_pts = tf.constant(np.array([x,y]).T, dtype = tf.float32)
+         self.last_used_pts = tf.constant(np.array([x,y]).T, dtype = self.dtype)
          
          if self.boundary_type == 'Dirichlet':
              if self.derivative_regularizer_coefficient == 0.0:
@@ -83,7 +84,7 @@ class Boundary1D:
                      tape.watch(self.last_used_pts)
                      y = model.predict_on_batch(self.last_used_pts)
                  grad = tape.gradient(y, self.last_used_pts)
-                 dydt = tf.einsum('ij,ij->i',grad,tf.constant(self.get_tangent_vectors(t_values, return_unit_vectors = True).T,dtype = tf.float32))
+                 dydt = tf.einsum('ij,ij->i',grad,tf.constant(self.get_tangent_vectors(t_values, return_unit_vectors = True).T,dtype = self.dtype))
                  return y, dydt
                  
          elif self.boundary_type == 'von Neumann' or self.boundary_type == 'Robin':
@@ -92,11 +93,11 @@ class Boundary1D:
                  tape.watch(self.last_used_pts)
                  y = model.predict_on_batch(self.last_used_pts)
              grad = tape.gradient(y, self.last_used_pts)
-             normal_gradients = tf.einsum('ij,ij->i',grad,tf.constant(self.get_normal_vectors(t_values, return_unit_vectors = True).T,dtype = tf.float32))
+             normal_gradients = tf.einsum('ij,ij->i',grad,tf.constant(self.get_normal_vectors(t_values, return_unit_vectors = True).T,dtype = self.dtype))
              if self.derivative_regularizer_coefficient == 0.0:
                  dydt = None
              else:
-                 dydt = tf.einsum('ij,ij->i',grad,tf.constant(self.get_tangent_vectors(t_values, return_unit_vectors = True).T,dtype = tf.float32))
+                 dydt = tf.einsum('ij,ij->i',grad,tf.constant(self.get_tangent_vectors(t_values, return_unit_vectors = True).T,dtype = self.dtype))
              
              if self.boundary_type == 'von Neumann':
                  return normal_gradients, dydt
@@ -105,10 +106,10 @@ class Boundary1D:
     
     def evaluate_error(self, model, n_quadpts = 5): #evaluates error
         #Evaluates the error between the values provided by the model and the RHS using Gauss-Legendre quadrature
-        quadrature_t, quadrature_w = tuple([np.polynomial.legendre.leggauss(n_quadpts)[i].astype(np.float32) for i in range(2)]) #get quadrature pts
-        c = np.array(0.5*(self.t[-1] - self.t[0]),dtype=np.float32)#helper variables
-        d = np.array(0.5*(self.t[-1] + self.t[0]),dtype=np.float32)
-        quadpts = tf.constant(c*quadrature_t+d, dtype = tf.float32) #quadrature points on boundary
+        quadrature_t, quadrature_w = tuple([np.polynomial.legendre.leggauss(n_quadpts)[i].astype(self.dtype) for i in range(2)]) #get quadrature pts
+        c = np.array(0.5*(self.t[-1] - self.t[0]),dtype=self.dtype)#helper variables
+        d = np.array(0.5*(self.t[-1] + self.t[0]),dtype=self.dtype)
+        quadpts = tf.constant(c*quadrature_t+d, dtype = self.dtype) #quadrature points on boundary
         #pdb.set_trace()
         LHS, LHSderivatives = self.LHS_evaluate(model, quadpts) #LHS values
         
@@ -128,7 +129,7 @@ class Boundary1D:
                 with tf.GradientTape() as tape:
                     tape.watch(self.last_used_pts)
                     RHS = self.RHS_evaluate(quadpts)
-                RHSderivatives = tf.einsum('ij,ij->i', tape.gradient(RHS, self.last_used_pts), tf.constant(self.get_tangent_vectors(quadpts, return_unit_vectors = True).T,dtype = tf.float32))
+                RHSderivatives = tf.einsum('ij,ij->i', tape.gradient(RHS, self.last_used_pts), tf.constant(self.get_tangent_vectors(quadpts, return_unit_vectors = True).T,dtype = self.dtype))
         
         #Calculate Lp norm and return
         if len(self.error_type) == 2 and self.error_type[0] == 'L':
