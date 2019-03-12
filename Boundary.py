@@ -52,9 +52,9 @@ class Boundary1D:
         elif self.orientation == 'clockwise':
             self.tangent_to_normal_rotation_matrix = np.array([[0,-1],[1,0]])
     
-    @tf.contrib.eager.defun #wrapper function for the RHS function to permit parallelization
+    #@tf.contrib.eager.defun #wrapper function for the RHS function to permit parallelization
     def RHS_evaluate(self, x):
-        return tf.map_fn(self.RHS_function, x, parallel_iterations=self.n_threads)
+        return tf.map_fn(self.RHS_function, x, dtype = self.dtype)
             
     def get_tangent_vectors(self,t_values, return_unit_vectors = False): #get tangent vectors to the boundary at the specified pts
         tmp = np.array([self.dxdt(t_values), self.dydt(t_values)])
