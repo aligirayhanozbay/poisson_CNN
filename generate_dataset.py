@@ -1,14 +1,10 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense, Conv2D, Flatten, Conv2DTranspose, AveragePooling2D, Add
 from scipy.interpolate import RectBivariateSpline
-import tensorflow.contrib.eager as tfe
 from Boundary import Boundary1D
-from collections.abc import Iterable
 import itertools, h5py, os, sys, time
 from multiprocessing import Pool as ThreadPool
-from Lp_integral_norm import Lp_integral_norm
+import argparse
 opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)
 conf = tf.ConfigProto(gpu_options=opts)
 tfe.enable_eager_execution(config=conf)
@@ -143,10 +139,16 @@ def generate_dataset(batch_size, n, h, boundaries, n_batches = 1, rhs_range = [-
     return tf.reshape(soln, (n_batches*batch_size, 1, soln.shape[-2], soln.shape[-1])), tf.reshape(tf.concat(F, axis = 0), (n_batches*batch_size, 1, F[0].shape[-2], F[0].shape[-1]))
 
 
-_, outputpath, ntest, h, batch_size, n_batches = sys.argv
+#_, outputpath, ntest, h, batch_size, n_batches = sys.argv
+parser = argparse.ArgumentParser(description = "Generate a series of Poisson equation RHS-solution pairs with specified Dirichlet boundary conditions on square domains")
+parser.add_argument('-n', help = "No of gridpoints per side", required = True)
+parser.add_argument('-h', help = "Grid spacing", required = True)
+parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 20)
+parser.add_argument('-bs', '--batch_size' ,help = "Grid spacing", required = True)
+args = parser.parse_args()
 
-
-ntest = int(ntest)
+ntest = args.n
+print(ntest)
 h = float(h)
 batch_size = int(batch_size)
 n_batches = int(n_batches)
