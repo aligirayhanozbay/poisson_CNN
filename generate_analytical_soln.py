@@ -1,0 +1,79 @@
+import numpy as np
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+import itertools, h5py
+from multiprocessing import Pool as ThreadPool
+
+class integrator_nd:
+    def __init__(self, domain = [0,1,0,1], n_quadpts = 20):
+        ndims = len(domain)//2
+        quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(n_quadpts)[i].astype(np.float64) for i in range(2)]) #quadrature weights and points
+        c = np.array([np.array(0.5*(domain[n+1] - domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]) #scaling coefficients - for handling domains other than [-1,1] x [-1,1]
+        d = np.array([np.array(0.5*(domain[n+1] + domain[n]),dtype=np.float64) for n in range(0,len(domain),2)])
+        self.quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, np.einsum('i...,i->i...',np.array(np.meshgrid(*list(itertools.repeat(quadrature_x,ndims)),indexing = 'xy')),c)).transpose(list(np.arange(1,ndims+1)) + [0]),dtype = tf.float64)
+    
+        self.quadweights = np.prod(c)*quadrature_w
+    
+        for i in range(1,ndims):
+            self.quadweights = np.tensordot(self.quadweights,quadrature_w,axes=0)
+                                      
+    def __call__(self, f):
+        fi = f(*tf.unstack(self.quadpts, axis = -1))
+        return tf.reduce_sum(tf.multiply(self.quadweights,fi))
+
+def mode_coeff_calculation_multiprocessing_wrapper(args):
+    F = args[0]
+    domain_volume = args[1]
+    mplus1_pi_over_L = args[2]
+    integrator = args[3]
+    two_to_the_power_ndims = args[4]
+    
+    coefficients = []
+    for i in range(int(mplus1_pi_over_L.shape[0])):
+        integrand = lambda *vars: F(*vars) * tf.reduce_prod(tf.sin(np.einsum('i...,i->i...',np.stack(vars),mplus1_pi_over_L[i])),axis=0)
+        coefficients.append(-integrator(integrand) * tf.cast(two_to_the_power_ndims,tf.float64) / (tf.cast(domain_volume,tf.float64) * tf.reduce_sum(tf.square(mplus1_pi_over_L[i]))))
+    
+    return tf.constant(np.array(coefficients), dtype = tf.float64)
+
+def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], random_function_bounds = [-1,1], ndims = 2, n_threads = 16, rhs_return = True):
+    #solution strategy as outlined in
+    #https://en.wikiversity.org/wiki/Partial_differential_equations/Poisson_Equation#Solution_to_Case_with_4_Homogeneous_Boundary_Conditions
+
+    coords = [np.linspace(0,domain[i], output_shape[i]) for i in range(len(output_shape))] #Evaluate coordinates along each axis
+    coord_meshes = np.array(np.meshgrid(*coords)) #Create meshgrid
+    ndims = len(domain) #No of dims of function
+    mode_permutations = np.array(list(itertools.product(*[np.arange(nmodes[i]) for i in range(len(nmodes))]))) #Every permutation of Fourier modes along different axes possible
+    mplus1_pi_over_L = np.einsum('j,ij->ij',1/np.array(domain),(mode_permutations + 1)*np.pi) #compute (m_i+1)*pi/L_i
+    sine_vals = np.prod(np.sin(np.einsum('ij,j...->ij...', mplus1_pi_over_L, coord_meshes)),axis=1) #sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
+    
+    if rhs == 'random': #Generate random Fourier coefficients for a random RHS
+        #For an n dimensional RHS function F(x_1,...x_n) = \sum_{m_1,...,m_n} (A_{m_1,...,m_n} * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
+        #\int_0^{L_n} ... \int_0^{L_1} F * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n) dx_1 ... dx_n = A*L_1*...*L_n/2^n
+        #Thus the solution to the Poisson equation \nabla^2 u = F will be u = a_{m_1,...,m_n} * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
+        #where a_{m_1,...,m_n} = -A_{m_1,...,m_n} * /(((m_1+1)*pi/L_1)^2+...+((m_n+1)*pi/L_n)^2)
+        rhs_function_coeffs = tf.multiply(2*tf.random.uniform(tf.stack([mode_permutations.shape[0]]),dtype = tf.float64)-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.float64),axis=1))) #Random RHS function Fourier coefficients
+        soln_function_coeffs = -tf.divide(rhs_function_coeffs, tf.reduce_sum(tf.square(mplus1_pi_over_L),axis=1)) #Random solution Fourier coefficients
+        
+        if rhs_return:
+            return np.einsum('i,i...->...', rhs_function_coeffs, sine_vals), np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
+        else:
+            return np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
+        
+    elif callable(rhs):
+        if np.prod(nmodes) % n_threads != 0:
+            raise(ValueError('n_threads must divide reduce_prod(nmodes)'))
+        
+        pool = ThreadPool(n_threads) 
+        full_domain = np.zeros((len(domain)*2)) #add lower bound 0s to domain argument for compatibility with integrate_nd
+        full_domain[1::2] += np.array(domain)
+        
+        itg = integrator_nd(domain = full_domain)
+        
+        soln_function_coeffs = tf.concat(list(map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads)))),axis=0)
+        
+        if rhs_return:
+            return rhs(*coord_meshes), np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
+        else:
+            return np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
+    else:
+        raise(TypeError('rhs must either be a callable function to be evaluated or random'))
