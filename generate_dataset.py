@@ -1,13 +1,15 @@
 import numpy as np
 import tensorflow as tf
+import tensorflow.contrib.eager as tfe
 from scipy.interpolate import RectBivariateSpline
+from collections.abc import Iterable
 from Boundary import Boundary1D
 import itertools, h5py, os, sys, time
 from multiprocessing import Pool as ThreadPool
 import argparse
 opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)
 conf = tf.ConfigProto(gpu_options=opts)
-tfe.enable_eager_execution(config=conf)
+tf.enable_eager_execution(config=conf)
 tf.keras.backend.set_floatx('float64')
 
 def poisson_matrix(m,n):
@@ -138,36 +140,37 @@ def generate_dataset(batch_size, n, h, boundaries, n_batches = 1, rhs_range = [-
     #return tf.reshape(soln, (n_batches, batch_size, lhs_chol.shape[0])), tf.reshape(F, (n_batches, batch_size, F.shape[-2], F.shape[-1]))
     return tf.reshape(soln, (n_batches*batch_size, 1, soln.shape[-2], soln.shape[-1])), tf.reshape(tf.concat(F, axis = 0), (n_batches*batch_size, 1, F[0].shape[-2], F[0].shape[-1]))
 
+if __name__ == '__main__':
+    #_, outputpath, ntest, h, batch_size, n_batches = sys.argv
+    parser = argparse.ArgumentParser(description = "Generate a series of Poisson equation RHS-solution pairs with specified Dirichlet boundary conditions on square domains")
+    parser.add_argument('-o', help = "Path to output file", required = True)
+    parser.add_argument('-n', help = "No of gridpoints per side", required = True)
+    parser.add_argument('-dx', help = "Grid spacing", required = True)
+    parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 20)
+    parser.add_argument('-bs', '--batch_size' ,help = "Grid spacing", required = True)
+    args = parser.parse_args()
 
-#_, outputpath, ntest, h, batch_size, n_batches = sys.argv
-parser = argparse.ArgumentParser(description = "Generate a series of Poisson equation RHS-solution pairs with specified Dirichlet boundary conditions on square domains")
-parser.add_argument('-n', help = "No of gridpoints per side", required = True)
-parser.add_argument('-h', help = "Grid spacing", required = True)
-parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 20)
-parser.add_argument('-bs', '--batch_size' ,help = "Grid spacing", required = True)
-args = parser.parse_args()
+    ntest = int(args.n)
+    h = float(args.dx)
+    batch_size = int(args.batch_size)
+    n_batches = int(args.t)
+    outputpath = str(args.o)
+    
+    folder = 'dataset_' + str(ntest)
+    boundary_top = Boundary1D('Dirichlet', [(0,ntest*h),(ntest*h,ntest*h)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
+    boundary_right = Boundary1D('Dirichlet', [(ntest*h,ntest*h),(ntest*h,0)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
+    boundary_bottom = Boundary1D('Dirichlet', [(ntest*h,0),(0,0)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
+    boundary_left = Boundary1D('Dirichlet', [(0,0),(0,ntest*h)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
 
-ntest = args.n
-print(ntest)
-h = float(h)
-batch_size = int(batch_size)
-n_batches = int(n_batches)
-
-folder = 'dataset_' + str(ntest)
-boundary_top = Boundary1D('Dirichlet', [(0,ntest*h),(ntest*h,ntest*h)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
-boundary_right = Boundary1D('Dirichlet', [(ntest*h,ntest*h),(ntest*h,0)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
-boundary_bottom = Boundary1D('Dirichlet', [(ntest*h,0),(0,0)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
-boundary_left = Boundary1D('Dirichlet', [(0,0),(0,ntest*h)], orientation='clockwise', RHS_function=lambda t: t-t, boundary_rhs_is_parametric=True)
-
-t0 = time.time()
-soln,F = generate_dataset(batch_size=batch_size, n = ntest, h = h, n_batches=n_batches, boundaries={'top': boundary_top.RHS_evaluate(np.linspace(boundary_top.t.min(),boundary_top.t.max(),ntest)), 'right': boundary_right.RHS_evaluate(np.linspace(boundary_right.t.min(),boundary_right.t.max(),ntest)), 'bottom': boundary_bottom.RHS_evaluate(np.linspace(boundary_bottom.t.min(),boundary_bottom.t.max(),ntest)), 'left': boundary_left.RHS_evaluate(np.linspace(boundary_left.t.min(),boundary_left.t.max(),ntest))})
-t1 = time.time()
-print('Generation of training data took ' + str(t1-t0) + ' seconds')
-with h5py.File(outputpath, 'w') as hf:
-    hf.create_dataset('soln', data=soln)
-    hf.create_dataset('F', data=F)
-print('Data saved.')
-print('Max RHS  : ' + str(tf.reduce_max(F)))
-print('Min RHS  : ' + str(tf.reduce_min(F)))
-print('Max soln : ' + str(tf.reduce_max(soln)))
-print('Min soln : ' + str(tf.reduce_min(soln)))
+    t0 = time.time()
+    soln,F = generate_dataset(batch_size=batch_size, n = ntest, h = h, n_batches=n_batches, boundaries={'top': boundary_top.RHS_evaluate(np.linspace(boundary_top.t.min(),boundary_top.t.max(),ntest)), 'right': boundary_right.RHS_evaluate(np.linspace(boundary_right.t.min(),boundary_right.t.max(),ntest)), 'bottom': boundary_bottom.RHS_evaluate(np.linspace(boundary_bottom.t.min(),boundary_bottom.t.max(),ntest)), 'left': boundary_left.RHS_evaluate(np.linspace(boundary_left.t.min(),boundary_left.t.max(),ntest))})
+    t1 = time.time()
+    print('Generation of training data took ' + str(t1-t0) + ' seconds')
+    with h5py.File(outputpath, 'w') as hf:
+        hf.create_dataset('soln', data=soln)
+        hf.create_dataset('F', data=F)
+    print('Data saved.')
+    print('Max RHS  : ' + str(tf.reduce_max(F)))
+    print('Min RHS  : ' + str(tf.reduce_min(F)))
+    print('Max soln : ' + str(tf.reduce_max(soln)))
+    print('Min soln : ' + str(tf.reduce_min(soln)))

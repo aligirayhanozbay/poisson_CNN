@@ -5,6 +5,23 @@ import itertools, h5py
 from multiprocessing import Pool as ThreadPool
 
 class integrator_nd:
+    '''
+    Class that integrates a given function f in an n-dimensional box.
+    
+    --Init arguments--
+    -domain       : Defines the boundaries of the box. Format is [dim1 start, dim1 end, dim2 start, dim2 end, ..., dim_n start, dim_n end]
+    -n_quadpts    : No of Gauss Legendre quadrature points across across each dimension
+    
+    --Call arguments--
+    -f            : Callable taking n double-precision tensorflow tensors (shape of each: n_quadpts x n_quadpts x ... x n_quadpts, repeated n times) as arguments (n = dimensionality of the integration domain, i.e. len(domain)//2) and returning one double-precision tensorflow tensor of shape n_quadpts x n_quadpts x ... x n_quadpts, repeated n times. Represents the function to integrate. The inputs will be meshgrids containing the coordinates of the function to integrate, and output must be the values of the function.
+    
+    --Example--
+    We want to integrate e^(-x^2-y^2-z^2) in the domain x = [1,2], y = [1,2], z = [1,2].
+    First we need to define our function: g = lambda x,y,z: tf.exp(x**2+y**2+z**2)
+    Then we create the integreator: itg = integrator_nd(domain=[1.0,2.0,1.0,2.0,1.0,2.0])
+    Finally, we evaluate the integral by calling the integrator: itg(g)
+    '''
+    
     def __init__(self, domain = [0,1,0,1], n_quadpts = 20):
         ndims = len(domain)//2
         quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(n_quadpts)[i].astype(np.float64) for i in range(2)]) #quadrature weights and points
@@ -22,6 +39,8 @@ class integrator_nd:
         return tf.reduce_sum(tf.multiply(self.quadweights,fi))
 
 def mode_coeff_calculation_multiprocessing_wrapper(args):
+    #Integrates F(x1,x2,...,xn) * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n)) dx_1 ... dx_n. Written as a separate function to permit multiprocessing pool map
+    
     F = args[0]
     domain_volume = args[1]
     mplus1_pi_over_L = args[2]
@@ -35,9 +54,23 @@ def mode_coeff_calculation_multiprocessing_wrapper(args):
     
     return tf.constant(np.array(coefficients), dtype = tf.float64)
 
-def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], random_function_bounds = [-1,1], ndims = 2, n_threads = 16, rhs_return = True):
-    #solution strategy as outlined in
-    #https://en.wikiversity.org/wiki/Partial_differential_equations/Poisson_Equation#Solution_to_Case_with_4_Homogeneous_Boundary_Conditions
+def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], n_threads = 16, rhs_return = True, max_random_magnitude = np.inf):
+    '''
+    Generates an analytical solution to the Poisson equation with homogeneous Dirichlet (i.e. 0) Boundary conditions in the box x_1 = [0, L_1], ..., x_n = [0, L_n]
+    Solution strategy is Fourier series based as outlined in
+    https://en.wikiversity.org/wiki/Partial_differential_equations/Poisson_Equation#Solution_to_Case_with_4_Homogeneous_Boundary_Conditions
+    
+    --Inputs--
+    -rhs: Callable compatible with integrator_nd, or 'random'. If a callable is given, an analytical  solution for that function will be generated. If 'random', a random function containing random Fourier modes defined in nmodes will be returned.
+    -output_shape: Shape of the output
+    -nmodes: # of Fourier modes to include for each direction
+    -domain: [L_1,L_2,...L_n]
+    -n_threads: no of multiprocessing threads
+    -rhs_return: If set to true, it'll also return the RHS source term of the Poisson equation sampled at the same points as the solution
+    -max_random_magnitude: If rhs is 'random', the solution will be scaled such that the maximum absolute value of the output will be this value.
+    '''
+    
+
 
     coords = [np.linspace(0,domain[i], output_shape[i]) for i in range(len(output_shape))] #Evaluate coordinates along each axis
     coord_meshes = np.array(np.meshgrid(*coords)) #Create meshgrid
@@ -54,10 +87,17 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
         rhs_function_coeffs = tf.multiply(2*tf.random.uniform(tf.stack([mode_permutations.shape[0]]),dtype = tf.float64)-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.float64),axis=1))) #Random RHS function Fourier coefficients
         soln_function_coeffs = -tf.divide(rhs_function_coeffs, tf.reduce_sum(tf.square(mplus1_pi_over_L),axis=1)) #Random solution Fourier coefficients
         
+        rhs = np.einsum('i,i...->...', rhs_function_coeffs, sine_vals)
+        soln = np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
+        if max_random_magnitude != np.inf:
+            max_magnitude = min(max_random_magnitude,tf.reduce_max(tf.abs(rhs_function_coeffs)))
+            rhs *= max_magnitude
+            soln *= max_magnitude
+            
         if rhs_return:
-            return np.einsum('i,i...->...', rhs_function_coeffs, sine_vals), np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
+            return rhs, soln
         else:
-            return np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
+            return soln
         
     elif callable(rhs):
         if np.prod(nmodes) % n_threads != 0:
