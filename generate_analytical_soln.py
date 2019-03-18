@@ -65,7 +65,7 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
     -output_shape: Shape of the output
     -nmodes: # of Fourier modes to include for each direction
     -domain: [L_1,L_2,...L_n]
-    -n_threads: no of multiprocessing threads
+    -n_threads: no of multiprocessing threads. useful only in non-random rhses
     -rhs_return: If set to true, it'll also return the RHS source term of the Poisson equation sampled at the same points as the solution
     -max_random_magnitude: If rhs is 'random', the solution will be scaled such that the maximum absolute value of the output will be this value.
     '''
@@ -109,7 +109,10 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
         
         itg = integrator_nd(domain = full_domain)
         
-        soln_function_coeffs = tf.concat(list(map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads)))),axis=0)
+        #soln_function_coeffs = tf.concat(list(map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads)))),axis=0)
+        
+        soln_function_coeffs = tf.concat(pool.map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads))),axis=0)
+
         
         if rhs_return:
             return rhs(*coord_meshes), np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
@@ -117,3 +120,15 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
             return np.einsum('i,i...->...', soln_function_coeffs, sine_vals)
     else:
         raise(TypeError('rhs must either be a callable function to be evaluated or random'))
+        
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description = "Generate a series of analytical Poisson equation RHS-solution pairs with 0 Dirichlet boundary conditions on square domains")
+    parser.add_argument('-o', help = "Path to output file", required = True)
+    parser.add_argument('-n', help = "No of gridpoints per side", required = True)
+    parser.add_argument('-nm',help = "# of Fourier modes to include for each direction")
+    parser.add_argument('-dx', help = "Grid spacing", required = False)
+    parser.add_argument('-d', '--domain', help = "Domain extent", required = False)
+    parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 20)
+    parser.add_argument('-bs', '--batch_size' ,help = "Grid spacing", required = True)
+    args = parser.parse_args()
