@@ -70,8 +70,15 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
     -max_random_magnitude: If rhs is 'random', the solution will be scaled such that the maximum absolute value of the output will be this value.
     '''
     
-
-
+    
+    #import inspect
+    #frame = inspect.currentframe()
+    #args, _, _, values = inspect.getargvalues(frame)
+    #print('-----------------------')
+    #print('function name ' + str(inspect.getframeinfo(frame)[2]))
+    #for i in args:
+    #    print(i + ' = ' + str(values[i]))
+    
     coords = [np.linspace(0,domain[i], output_shape[i]) for i in range(len(output_shape))] #Evaluate coordinates along each axis
     coord_meshes = np.array(np.meshgrid(*coords)) #Create meshgrid
     ndims = len(domain) #No of dims of function
@@ -121,14 +128,68 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
     else:
         raise(TypeError('rhs must either be a callable function to be evaluated or random'))
         
+def random_calculation_multiprocessing_wrapper(args):
+    
+    opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
+    conf = tf.ConfigProto(gpu_options=opts)
+    tf.enable_eager_execution(config=conf)
+    
+    batch_size = args[0]
+    solution_generator_parameters = args[1]
+    rhses = []
+    solns = []
+    for i in range(batch_size):
+        rhs, soln = generate_analytical_solution_homogeneous_bc(**solution_generator_parameters)
+        rhses.append(rhs)
+        solns.append(solns)
+    return np.concatenate(rhses), np.concatenate(solns)
+        
 if __name__ == '__main__':
     import argparse
+    import time
     parser = argparse.ArgumentParser(description = "Generate a series of analytical Poisson equation RHS-solution pairs with 0 Dirichlet boundary conditions on square domains")
     parser.add_argument('-o', help = "Path to output file", required = True)
-    parser.add_argument('-n', help = "No of gridpoints per side", required = True)
-    parser.add_argument('-nm',help = "# of Fourier modes to include for each direction")
-    parser.add_argument('-dx', help = "Grid spacing", required = False)
-    parser.add_argument('-d', '--domain', help = "Domain extent", required = False)
-    parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 20)
-    parser.add_argument('-bs', '--batch_size' ,help = "Grid spacing", required = True)
+    parser.add_argument('-n', help = "No of gridpoints per side, specified by a series of integers separated by spaces (e.g. -n 64 64 64)", required = True)
+    parser.add_argument('-nm',help = "# of Fourier modes to include for each direction, specified by a series of integers separated by spaces (e.g. -n 16 16 16)")
+    parser.add_argument('-dx', help = "Grid spacing. Must be supplied if --domain isn't.", required = False)
+    parser.add_argument('-d', '--domain', help = "Domain extent, specified by a series of numbers separated by spaces (e.g. -d 1 2.2 0.5)", required = False)
+    parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 1)
+    parser.add_argument('-bs', '--batch_size' ,help = "No of solutions to generate per thread", required = False, default = 1)
+    parser.add_argument('-m', '--max_magnitude', help = "Max magnitude of generated solutions", required = False, default = np.inf)
     args = parser.parse_args()
+    
+    try:
+        domain = [float(p) for p in args.domain.split(' ')]
+        output_shape = [int(p) for p in args.n.split(' ')]
+    except:
+        dx = float(args.dx)
+        output_shape = [int(p) for p in args.n.split(' ')]
+        domain = [dx*(p-1) for p in output_shape]
+        
+    nmodes = [int(p) for p in args.nm.split(' ')]
+    n_threads = int(args.t)
+    batch_size = int(args.batch_size)
+    outputpath = args.o
+    max_magnitude = np.float(args.max_magnitude)
+    
+    params = {'rhs' : 'random', 'output_shape' : output_shape, 'nmodes' : nmodes, 'domain' : domain, 'rhs_return' : True, 'max_random_magnitude' : max_magnitude}
+    
+    pool = ThreadPool(n_threads)
+    t0 = time.time()
+    rhses, solns = zip(*pool.map(random_calculation_multiprocessing_wrapper, itertools.repeat([batch_size, params], n_threads)))
+    #rhses, solns = zip(*list(map(random_calculation_multiprocessing_wrapper, itertools.repeat([batch_size, params], n_threads))))
+    t1 = time.time()
+    print('Generation of training data took ' + str(t1-t0) + ' seconds')
+    pool.close()
+    
+    rhses = tf.expand_dims(np.concatenate(rhses), axis = 1)
+    solns = tf.expand_dims(np.concatenate(rhses), axis = 1)
+    
+    with h5py.File(outputpath, 'w') as hf:
+        hf.create_dataset('soln', data=solns)
+        hf.create_dataset('F', data=rhses)
+    print('Data saved.')
+    print('Max RHS  : ' + str(tf.reduce_max(rhses)))
+    print('Min RHS  : ' + str(tf.reduce_min(rhses)))
+    print('Max soln : ' + str(tf.reduce_max(solns)))
+    print('Min soln : ' + str(tf.reduce_min(solns)))
