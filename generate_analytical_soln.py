@@ -91,24 +91,30 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
     #print(mplus1_pi_over_L)
     #print(coord_meshes)
     sine_vals = tf.reduce_prod(tf.sin(oe.contract('ij,j...->ij...', mplus1_pi_over_L, coord_meshes, backend = 'tensorflow')),axis=1) #sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
-    
-    print('checkpoint: sine vals generated')
+
     if rhs == 'random': #Generate random Fourier coefficients for a random RHS
         #For an n dimensional RHS function F(x_1,...x_n) = \sum_{m_1,...,m_n} (A_{m_1,...,m_n} * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
         #\int_0^{L_n} ... \int_0^{L_1} F * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n) dx_1 ... dx_n = A*L_1*...*L_n/2^n
         #Thus the solution to the Poisson equation \nabla^2 u = F will be u = a_{m_1,...,m_n} * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
         #where a_{m_1,...,m_n} = -A_{m_1,...,m_n} * /(((m_1+1)*pi/L_1)^2+...+((m_n+1)*pi/L_n)^2)
-        rhs_function_coeffs = tf.multiply(2*tf.random.uniform(tf.stack([mode_permutations.shape[0]]),dtype = tf.float64)-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.float64),axis=1))) #Random RHS function Fourier coefficients
-        soln_function_coeffs = -tf.divide(rhs_function_coeffs, tf.reduce_sum(tf.square(mplus1_pi_over_L),axis=1)) #Random solution Fourier coefficients
+        rhs_function_coeffs = oe.contract('ij,j->ij',2*tf.random.uniform(tf.stack([n_random, mode_permutations.shape[0]]),dtype = tf.float64)-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.float64),axis=1)), backend = 'tensorflow') #Random RHS function Fourier coefficients
+        soln_function_coeffs = -oe.contract('ij,j->ij',rhs_function_coeffs, tf.reduce_sum(tf.square(mplus1_pi_over_L),axis=1)**(-1), backend = 'tensorflow') #Random solution Fourier coefficients
         
-        rhs = oe.contract('i,i...->...', rhs_function_coeffs, sine_vals, backend = 'tensorflow')
-        soln = oe.contract('i,i...->...', soln_function_coeffs, sine_vals, backend = 'tensorflow')
+        
+        rhs = tf.Variable(oe.contract('ij,j...->i...', rhs_function_coeffs, sine_vals, backend = 'tensorflow'))
+        soln = tf.Variable(oe.contract('ij,j...->i...', soln_function_coeffs, sine_vals, backend = 'tensorflow'))
+        maxminratio = np.zeros((n_random))
+        
         if max_random_magnitude != np.inf:
-            scaling_factor = max_random_magnitude/tf.reduce_max(tf.abs(rhs))
-            rhs = rhs * scaling_factor
-            soln = soln * scaling_factor
+            for i in range(int(rhs.shape[0])):
+                scaling_factor = max_random_magnitude/tf.reduce_max(tf.abs(rhs[i,...]))
+                maxminratio[i] = tf.abs(tf.reduce_max(rhs[i,...]) / tf.reduce_min(rhs[i,...]))
+                rhs[i,...].assign(rhs[i,...] * scaling_factor)
+                soln[i,...].assign(soln[i,...] * scaling_factor)
+        
+        #print('---Peak positive magnitude to peak negative magnitude ratio---')
+        #print(np.median(maxminratio[np.abs(maxminratio) < 1e4]))
             
-        print('checkpoint: random generator returning')
         if rhs_return:
             return rhs, soln
         else:
@@ -159,8 +165,8 @@ if __name__ == '__main__':
     parser.add_argument('-nm',help = "# of Fourier modes to include for each direction, specified by a series of integers separated by spaces (e.g. -n 16 16 16)")
     parser.add_argument('-dx', help = "Grid spacing. Must be supplied if --domain isn't.", required = False)
     parser.add_argument('-d', '--domain', help = "Domain extent, specified by a series of numbers separated by spaces (e.g. -d 1 2.2 0.5)", required = False)
-    parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 1)
-    parser.add_argument('-bs', '--batch_size' ,help = "No of solutions to generate per thread", required = False, default = 1)
+    #parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 1)
+    parser.add_argument('-bs', '--batch_size' ,help = "No of solutions to generate", required = False, default = 1)
     parser.add_argument('-m', '--max_magnitude', help = "Max magnitude of generated solutions", required = False, default = np.inf)
     args = parser.parse_args()
     
@@ -173,19 +179,19 @@ if __name__ == '__main__':
         domain = [dx*(p-1) for p in output_shape]
         
     nmodes = [int(p) for p in args.nm.split(' ')]
-    n_threads = int(args.t)
+    #n_threads = int(args.t)
     batch_size = int(args.batch_size)
     outputpath = args.o
     max_magnitude = np.float(args.max_magnitude)
     
-    params = {'rhs' : 'random', 'output_shape' : output_shape, 'nmodes' : nmodes, 'domain' : domain, 'rhs_return' : True, 'max_random_magnitude' : max_magnitude}
+    params = {'rhs' : 'random', 'output_shape' : output_shape, 'nmodes' : nmodes, 'domain' : domain, 'rhs_return' : True, 'max_random_magnitude' : max_magnitude, 'n_random' : batch_size}
     
-    pool = ThreadPool(n_threads)
+    #pool = ThreadPool(n_threads)
     t0 = time.time()
-    res = pool.map(random_calculation_multiprocessing_wrapper, zip(itertools.repeat(batch_size, n_threads), itertools.repeat(params, n_threads)))
+    #res = pool.map(random_calculation_multiprocessing_wrapper, zip(itertools.repeat(batch_size, n_threads), itertools.repeat(params, n_threads)))
     #res = list(map(random_calculation_multiprocessing_wrapper, zip(itertools.repeat(batch_size, n_threads), itertools.repeat(params, n_threads))))
     #rhses, solns = zip(*list(map(random_calculation_multiprocessing_wrapper, itertools.repeat([batch_size, params], n_threads))))
-    #rhses, solns = generate_analytical_solution_homogeneous_bc(**params)
+    rhses, solns = generate_analytical_solution_homogeneous_bc(**params)
     t1 = time.time()
     print('Generation of training data took ' + str(t1-t0) + ' seconds')
     #pool.close()
@@ -193,6 +199,15 @@ if __name__ == '__main__':
     rhses = tf.expand_dims(tf.stack(rhses), axis = 1)
     solns = tf.expand_dims(tf.stack(solns), axis = 1)
     
+    from conv_laplacian_loss import conv_laplacian_loss
+    tf.keras.backend.set_floatx('float64')
+    try:
+        cll = conv_laplacian_loss(output_shape, dx)
+    except:
+        cll = conv_laplacian_loss(output_shape, domain[0]/(output_shape[0]-1))
+    
+    print('---conv laplacian loss---')
+    print(cll(rhses, solns))
     with h5py.File(outputpath, 'w') as hf:
         hf.create_dataset('soln', data=solns)
         hf.create_dataset('F', data=rhses)

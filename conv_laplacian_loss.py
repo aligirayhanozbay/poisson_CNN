@@ -21,6 +21,6 @@ def conv_laplacian_loss(image_size, h):
     mod.set_weights([(1/(12*h**2))*tf.constant(w, dtype=tf.float64),tf.constant([0.0], dtype=tf.float64)])
     #pdb.set_trace()
     @tf.contrib.eager.defun
-    def laplacian_loss(y_true, y_pred):
-        return tf.reduce_sum((mod(y_pred)[:,:,2:-2,2:-2]-y_true[:,:,2:-2,2:-2])**2)/tf.cast(tf.reduce_prod(y_true[:,:,2:-2,2:-2].shape), y_true.dtype)
+    def laplacian_loss(rhs, solution):
+        return tf.reduce_sum((mod(solution)[:,:,2:-2,2:-2]-rhs[:,:,2:-2,2:-2])**2)/tf.cast(tf.reduce_prod(rhs[:,:,2:-2,2:-2].shape), rhs.dtype)
     return laplacian_loss

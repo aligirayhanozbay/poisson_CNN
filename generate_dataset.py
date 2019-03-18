@@ -6,11 +6,7 @@ from collections.abc import Iterable
 from Boundary import Boundary1D
 import itertools, h5py, os, sys, time
 from multiprocessing import Pool as ThreadPool
-import argparse
-opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)
-conf = tf.ConfigProto(gpu_options=opts)
-tf.enable_eager_execution(config=conf)
-tf.keras.backend.set_floatx('float64')
+
 
 def poisson_matrix(m,n):
     '''
@@ -141,13 +137,19 @@ def generate_dataset(batch_size, n, h, boundaries, n_batches = 1, rhs_range = [-
     return tf.reshape(soln, (n_batches*batch_size, 1, soln.shape[-2], soln.shape[-1])), tf.reshape(tf.concat(F, axis = 0), (n_batches*batch_size, 1, F[0].shape[-2], F[0].shape[-1]))
 
 if __name__ == '__main__':
+    opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)
+    conf = tf.ConfigProto(gpu_options=opts)
+    tf.enable_eager_execution(config=conf)
+    tf.keras.backend.set_floatx('float64')
+    
+    import argparse
     #_, outputpath, ntest, h, batch_size, n_batches = sys.argv
     parser = argparse.ArgumentParser(description = "Generate a series of Poisson equation RHS-solution pairs with specified Dirichlet boundary conditions on square domains")
     parser.add_argument('-o', help = "Path to output file", required = True)
     parser.add_argument('-n', help = "No of gridpoints per side", required = True)
     parser.add_argument('-dx', help = "Grid spacing", required = True)
     parser.add_argument('-t', help = "No of parallel processing threads ", required = False, default = 20)
-    parser.add_argument('-bs', '--batch_size' ,help = "Grid spacing", required = True)
+    parser.add_argument('-bs', '--batch_size' ,help = "No of solutions to generate per thread", required = True)
     args = parser.parse_args()
 
     ntest = int(args.n)
