@@ -21,7 +21,7 @@ class integrator_nd:
     
     --Example--
     We want to integrate e^(-x^2-y^2-z^2) in the domain x = [1,2], y = [1,2], z = [1,2].
-    First we need to define our function: g = lambda x,y,z: tf.exp(x**2+y**2+z**2)
+    First we need to define our function: g = lambda x,y,z: tf.exp(-x**2-y**2-z**2)
     Then we create the integreator: itg = integrator_nd(domain=[1.0,2.0,1.0,2.0,1.0,2.0])
     Finally, we evaluate the integral by calling the integrator: itg(g)
     '''
@@ -29,14 +29,14 @@ class integrator_nd:
     def __init__(self, domain = [0,1,0,1], n_quadpts = 20):
         ndims = len(domain)//2
         quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(n_quadpts)[i].astype(np.float64) for i in range(2)]) #quadrature weights and points
-        c = np.array([np.array(0.5*(domain[n+1] - domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]) #scaling coefficients - for handling domains other than [-1,1] x [-1,1]
-        d = np.array([np.array(0.5*(domain[n+1] + domain[n]),dtype=np.float64) for n in range(0,len(domain),2)])
-        self.quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, oe.contract('i...,i->i...',np.array(np.meshgrid(*list(itertools.repeat(quadrature_x,ndims)),indexing = 'xy')),c, backend = 'tensorflow')).transpose(list(np.arange(1,ndims+1)) + [0]),dtype = tf.float64)
+        c = tf.constant(np.array([np.array(0.5*(domain[n+1] - domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]), dtype = tf.float64) #scaling coefficients - for handling domains other than [-1,1] x [-1,1]
+        d = tf.constant(np.array([np.array(0.5*(domain[n+1] + domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]), dtype = tf.float64)
+        self.quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, oe.contract('i...,i->i...',tf.stack(np.meshgrid(*list(itertools.repeat(quadrature_x,ndims)),indexing = 'xy'), axis=0),c, backend = 'tensorflow')).transpose(list(np.arange(1,ndims+1)) + [0]),dtype = tf.float64)
     
-        self.quadweights = np.prod(c)*quadrature_w
+        self.quadweights = tf.reduce_prod(c)*quadrature_w
     
         for i in range(1,ndims):
-            self.quadweights = np.tensordot(self.quadweights,quadrature_w,axes=0)
+            self.quadweights = tf.tensordot(self.quadweights,quadrature_w,axes=0)
                                       
     def __call__(self, f):
         fi = f(*tf.unstack(self.quadpts, axis = -1))
@@ -53,7 +53,7 @@ def mode_coeff_calculation_multiprocessing_wrapper(args):
     
     coefficients = []
     for i in range(int(mplus1_pi_over_L.shape[0])):
-        integrand = lambda *vars: F(*vars) * tf.reduce_prod(tf.sin(oe.contract('i...,i->i...',np.stack(vars),mplus1_pi_over_L[i],backend = 'tensorflow')),axis=0)
+        integrand = lambda *vars: F(*vars) * tf.reduce_prod(tf.sin(oe.contract('i...,i->i...',tf.stack(vars),mplus1_pi_over_L[i],backend = 'tensorflow')),axis=0)
         coefficients.append(-integrator(integrand) * tf.cast(two_to_the_power_ndims,tf.float64) / (tf.cast(domain_volume,tf.float64) * tf.reduce_sum(tf.square(mplus1_pi_over_L[i]))))
     
     return tf.constant(np.array(coefficients), dtype = tf.float64)
@@ -121,7 +121,7 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
             return soln
         
     elif callable(rhs):
-        if tf.reduce_prod(nmodes) % n_threads != 0:
+        if np.prod(nmodes) % n_threads != 0:
             raise(ValueError('n_threads must divide reduce_prod(nmodes)'))
         
         pool = ThreadPool(n_threads) 
@@ -130,9 +130,9 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
         
         itg = integrator_nd(domain = full_domain)
         
-        #soln_function_coeffs = tf.concat(list(map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads)))),axis=0)
+        soln_function_coeffs = tf.concat(list(map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads)))),axis=0)
         
-        soln_function_coeffs = tf.concat(pool.map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads))),axis=0)
+        #soln_function_coeffs = tf.concat(pool.map(mode_coeff_calculation_multiprocessing_wrapper, zip(itertools.repeat(rhs,n_threads), itertools.repeat(tf.reduce_prod(domain),n_threads), tf.split(mplus1_pi_over_L, n_threads, axis=0), itertools.repeat(itg,n_threads), itertools.repeat(2**ndims,n_threads))),axis=0)
 
         
         if rhs_return:

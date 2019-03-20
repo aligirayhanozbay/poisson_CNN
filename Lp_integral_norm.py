@@ -31,13 +31,13 @@ def Lp_integral_norm(image_size, domain, n_quadpts = 10, quadpts_randomization =
     interpolation_weights = [] #array that stores weights b_ii such that the interpolated value at x,y is b_ii*f(X_i, Y_j) within a rectangle bounded by [X_1,X_2] x [Y_1, Y_2] (shapes: (n_quadpts, n_quadpts, 4, 2))
     quadweights_list = [] #array that stores GL quad weights (shapes: (n_quadpts, n_quadpts))
     index_combinations_list = [] #array of tensors, where each tensor stores the indices for the 4 points between which every GL quad pt lies (shapes: (no of quadpts, no of quadpts, 4, 2))
-    coords = np.array(np.meshgrid(np.linspace(domain[0], domain[1], image_size[0]),np.linspace(domain[2], domain[3], image_size[1]),indexing = 'xy'), dtype = np.float32).transpose((1,2,0)) #coordinates of each grid pt in the domain
+    coords = np.array(np.meshgrid(np.linspace(domain[0], domain[1], image_size[0]),np.linspace(domain[2], domain[3], image_size[1]),indexing = 'xy'), dtype = np.float64).transpose((1,2,0)) #coordinates of each grid pt in the domain
     image_coords = [coords[0,:,0], coords[:,1,1]] #x and y coordinates separately
-    c = np.array([np.array(0.5*(domain[1] - domain[0]),dtype=np.float64),np.array(0.5*(domain[3] - domain[2]),dtype=np.float32)]) #scaling coefficients - for handling domains other than [-1,1] x [-1,1]
-    d = np.array([np.array(0.5*(domain[1] + domain[0]),dtype=np.float64),np.array(0.5*(domain[3] + domain[2]),dtype=np.float32)])
+    c = np.array([np.array(0.5*(domain[1] - domain[0]),dtype=np.float64),np.array(0.5*(domain[3] - domain[2]),dtype=np.float64)]) #scaling coefficients - for handling domains other than [-1,1] x [-1,1]
+    d = np.array([np.array(0.5*(domain[1] + domain[0]),dtype=np.float64),np.array(0.5*(domain[3] + domain[2]),dtype=np.float64)])
     for n in range(n_quadpts - quadpts_randomization, n_quadpts + quadpts_randomization+1): #loop over no of quadpts
         quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(n)[i].astype(np.float64) for i in range(2)]) #quadrature weights and points
-        quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, np.einsum('ijk,i->ijk',np.array(np.meshgrid(quadrature_x,quadrature_x,indexing = 'xy')),c)).transpose((1,2,0)),dtype = tf.float32)
+        quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, np.einsum('ijk,i->ijk',np.array(np.meshgrid(quadrature_x,quadrature_x,indexing = 'xy')),c)).transpose((1,2,0)),dtype = tf.float64)
         quadweights = tf.reduce_prod(c)*tf.tensordot(quadrature_w,quadrature_w,axes = 0)
         indices = [[],[]] #indices between each quadrature point lies - indices[0] is in x-dir and indices[1] is in the y-dir
         quad_coords = [quadpts[0,:,0], quadpts[:,1,1]] #x and y coordinates of each quad pt respectively
