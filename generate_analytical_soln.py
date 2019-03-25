@@ -36,7 +36,7 @@ class integrator_nd:
         self.quadweights = tf.reduce_prod(c)*quadrature_w
     
         for i in range(1,ndims):
-            self.quadweights = tf.tensordot(self.quadweights,quadrature_w,axes=0)
+            self.quadweights = oe.contract('...,i->...i',self.quadweights,quadrature_w)
                                       
     def __call__(self, f):
         fi = f(*tf.unstack(self.quadpts, axis = -1))
