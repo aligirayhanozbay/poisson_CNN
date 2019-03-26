@@ -136,7 +136,7 @@ def generate_dataset(batch_size, n, h, boundaries, n_batches = 1, rhs_range = [-
     #return tf.reshape(soln, (n_batches, batch_size, lhs_chol.shape[0])), tf.reshape(F, (n_batches, batch_size, F.shape[-2], F.shape[-1]))
     return tf.reshape(soln, (n_batches*batch_size, 1, soln.shape[-2], soln.shape[-1])), tf.reshape(tf.concat(F, axis = 0), (n_batches*batch_size, 1, F[0].shape[-2], F[0].shape[-1]))
 
-def cholesky_poisson_solve(rhses, boundaries, system_matrix = None, system_matrix_is_decomposed = False):
+def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_matrix_is_decomposed = False):
     
     if not system_matrix:
         system_matrix = poisson_matrix(int(rhses.shape[-2]), int(rhses.shape[-1]))
