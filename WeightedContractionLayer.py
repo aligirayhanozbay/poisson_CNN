@@ -9,7 +9,7 @@ class WeightedContractionLayer(tf.keras.layers.Layer):
         '''
         Init arguments
         
-        contraction_expression: str. Must be a valid opt_einsum contraction expression, ellipses not yet supported. First operand represents the weights to be created. Unlike typical einsum, if you have ellipses in the input tensor and you want to create the appropriately sized weight tensor for those axes, you MUST use an ellipsis in the weight tensor indices as well
+        contraction_expression: str. Must be a valid opt_einsum contraction expression. First operand represents the weights to be created. Unlike typical einsum, if you have ellipses in the input tensor and you want to create the appropriately sized weight tensor for those axes, you MUST use an ellipsis in the weight tensor indices as well. Do NOT USE Theta as a tensor index - this is used to handle ellipses.
         new_weight_dims: List of the size of new dimensions introduced in the weight tensor in the order they appear. For example, the contraction 'mk,jkl->ml' has a new axis m for the weights, so the user must specify its size. If an int is supplied, it will be automatically converted to a 1 element long list.
         contraction_expression_contains_batch_index: Boolean. Every tensor keras works with has 1 batch dimension as the 0th dim. Set this to False if your contraction_expression does not account for this - the init will take care of it.
         softmax_weights: Boolean. If set to true, the weights will be softmaxed before the contraction is performed.
@@ -25,7 +25,7 @@ class WeightedContractionLayer(tf.keras.layers.Layer):
         #parse contraction_expression
         self.contraction_expression = contraction_expression
         input_expressions, self.output_expression = contraction_expression.replace(' ', '').split('->')
-        self.weight_expression, self.input_expression = input_expressions.replace('...', 'E').split(',')
+        self.weight_expression, self.input_expression = input_expressions.replace('...', 'Θ').split(',')
         self.new_weight_dims = new_weight_dims
         
         #find which indices are shared and which aren't between the weights and the input
@@ -67,8 +67,7 @@ class WeightedContractionLayer(tf.keras.layers.Layer):
         super().build(input_shape)
         
     def call(self, inp):
-        if None in inp.shape: #This is ONLY necessary to pass the call during model __init__. DO NOT REMOVE.
-            print('asd')
+        if None in inp.shape: #This is ONLY necessary to not throw an exception during the call after __init__. DO NOT REMOVE.
             newshape = [1 if v is None else v for v in inp.shape]
             inp = tf.random.uniform(newshape, dtype = tf.keras.backend.floatx())
         #contract
