@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorflow.contrib.eager as tfe
 from tensorflow.keras.layers import Input, Conv2D
 from tensorflow.keras.models import Model
 import numpy as np
@@ -21,11 +20,22 @@ def conv_laplacian_loss(image_size, h, return_pointwise = False):
     mod.set_weights([(1/(12*h**2))*tf.constant(w, dtype=tf.float64),tf.constant([0.0], dtype=tf.float64)])
     #pdb.set_trace()
     if return_pointwise:
-        @tf.contrib.eager.defun
-        def laplacian_loss(rhs, solution):
-            return (mod(solution)[:,:,2:-2,2:-2]-rhs[:,:,2:-2,2:-2])**2
+        if int(tf.__version__[0]) < 2:
+            import tensorflow.contrib.eager as tfe
+            @tf.contrib.eager.defun
+            def laplacian_loss(rhs, solution):
+                return (mod(solution)[:,:,2:-2,2:-2]-rhs[:,:,2:-2,2:-2])**2
+        else: 
+            @tf.function
+            def laplacian_loss(rhs, solution):
+                return (mod(solution)[:,:,2:-2,2:-2]-rhs[:,:,2:-2,2:-2])**2
     else:
-        @tf.contrib.eager.defun
-        def laplacian_loss(rhs, solution):
-            return tf.reduce_sum((mod(solution)[:,:,2:-2,2:-2]-rhs[:,:,2:-2,2:-2])**2)/tf.cast(tf.reduce_prod(rhs[:,:,2:-2,2:-2].shape), rhs.dtype)
+        if int(tf.__version__[0]) < 2:
+            @tf.contrib.eager.defun
+            def laplacian_loss(rhs, solution):
+                return tf.reduce_sum((mod(solution)[:,:,2:-2,2:-2]-rhs[:,:,2:-2,2:-2])**2)/tf.cast(tf.reduce_prod(rhs[:,:,2:-2,2:-2].shape), rhs.dtype)
+        else:
+            @tf.function
+            def laplacian_loss(rhs, solution):
+                return tf.reduce_sum((mod(solution)[:,:,2:-2,2:-2]-rhs[:,:,2:-2,2:-2])**2)/tf.cast(tf.reduce_prod(rhs[:,:,2:-2,2:-2].shape), rhs.dtype)
     return laplacian_loss

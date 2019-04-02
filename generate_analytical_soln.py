@@ -1,12 +1,8 @@
 import numpy as np
 import tensorflow as tf
-import tensorflow.contrib.eager as tfe
 import itertools, h5py
 import opt_einsum as oe
 from multiprocessing import Pool as ThreadPool
-opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
-conf = tf.ConfigProto(gpu_options=opts)
-tf.enable_eager_execution(config=conf)
 
 class integrator_nd:
     '''
@@ -157,6 +153,12 @@ def random_calculation_multiprocessing_wrapper(args):
     return np.concatenate(rhses), np.concatenate(solns)
         
 if __name__ == '__main__':
+    
+    if int(tf.__version__[0]) < 0:
+        opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
+        conf = tf.ConfigProto(gpu_options=opts)
+        tf.enable_eager_execution(config=conf)
+    
     import argparse
     import time
     parser = argparse.ArgumentParser(description = "Generate a series of analytical Poisson equation RHS-solution pairs with 0 Dirichlet boundary conditions on square domains")

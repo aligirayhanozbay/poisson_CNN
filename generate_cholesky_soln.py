@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-import tensorflow.contrib.eager as tfe
 from scipy.interpolate import RectBivariateSpline
 from collections.abc import Iterable
 from Boundary import Boundary1D
@@ -149,17 +148,21 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
         system_matrix_chol = system_matrix
     
     def chol(r):
-        return tf.linalg.cholesky_solve(system_matrix_chol, tf.transpose(tf.stack([r])))
+        return tf.linalg.cholesky_solve(system_matrix_chol, tf.expand_dims(r, axis = 0))
     
-    @tf.contrib.eager.defun
-    def chol_solve(rhs_arr):
-        return tf.map_fn(chol, rhs_arr)
     try:
-        rhs_vectors = tf.transpose(tf.squeeze(poisson_RHS([np.array(rhses), boundaries, h])), (0,1))
+        #@tf.contrib.eager.defun
+        def chol_solve(rhs_arr):
+            return tf.map_fn(chol, rhs_arr)
+    except:
+        #@tf.function
+        def chol_solve(rhs_arr):
+            return tf.map_fn(chol, rhs_arr)
+    
+    try:
+        rhs_vectors = tf.expand_dims(tf.transpose(tf.squeeze(poisson_RHS([np.array(rhses), boundaries, h])), (0,1)),axis=2)
     except:
         rhs_vectors = tf.expand_dims(tf.expand_dims(tf.squeeze(poisson_RHS([np.array(rhses), boundaries, h])),axis=1), axis=0)
-    print(rhs_vectors.shape)
-    print(system_matrix_chol.shape)
     
     z = tf.reshape(chol_solve(rhs_vectors), list(rhses.shape[:-2]) + [int(rhses.shape[-1])-2, int(rhses.shape[-2])-2])
     z = tf.transpose(z, list(range(len(z.shape[:-2]))) + [len(z.shape)-1, len(z.shape)-2])
@@ -171,7 +174,7 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
     soln[...,-1,:] = boundaries['right']
     soln[...,1:-1,1:-1] = z
     
-    return soln                   
+    return soln         
 
 if __name__ == '__main__':
     opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)

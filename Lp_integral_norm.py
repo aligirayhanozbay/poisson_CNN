@@ -1,5 +1,5 @@
-import numpy as np
 import tensorflow as tf
+import numpy as np
 import itertools
 
 def Lp_integral_norm(image_size, domain, n_quadpts = 10, quadpts_randomization = 0, p=2, mse_component_weight = 0.0):
@@ -38,7 +38,8 @@ def Lp_integral_norm(image_size, domain, n_quadpts = 10, quadpts_randomization =
     for n in range(n_quadpts - quadpts_randomization, n_quadpts + quadpts_randomization+1): #loop over no of quadpts
         quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(n)[i].astype(np.float64) for i in range(2)]) #quadrature weights and points
         quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, np.einsum('ijk,i->ijk',np.array(np.meshgrid(quadrature_x,quadrature_x,indexing = 'xy')),c)).transpose((1,2,0)),dtype = tf.float64)
-        quadweights = tf.reduce_prod(c)*tf.tensordot(quadrature_w,quadrature_w,axes = 0)
+        #quadweights = tf.reduce_prod(c)*tf.tensordot(tf.squeeze(quadrature_w),tf.squeeze(quadrature_w),axes = 0)
+        quadweights = tf.reduce_prod(c) * tf.einsum('i,j->ij',tf.squeeze(quadrature_w),tf.squeeze(quadrature_w))
         indices = [[],[]] #indices between each quadrature point lies - indices[0] is in x-dir and indices[1] is in the y-dir
         quad_coords = [quadpts[0,:,0], quadpts[:,1,1]] #x and y coordinates of each quad pt respectively
         #find the indices of coords between which every quad. pt. lies
@@ -92,39 +93,78 @@ def Lp_integral_norm(image_size, domain, n_quadpts = 10, quadpts_randomization =
         quadweights_list.append(tf.cast(quadweights,dtype))
         index_combinations_list.append(index_combinations)
         interpolation_weights.append(tf.cast(b, dtype))
+
+    if int(tf.__version__[0]) < 2:
+        @tf.contrib.eager.defun
+        def Lp_integrate_batch(inp):
+            '''
+            Helper function to facilitate quad pt randomization
+
+            Given the bilinear interp. weights b, GL quad. weights w, Lp norm order p and the indices bounding each quad pt ind, computes the Lp norm for each channel/batch element
+            '''
+            #unpack values
+            data = tf.transpose(inp[0], (2,3,1,0))
+            b = inp[1]
+            w = inp[2]
+            ind = inp[3]
+            p = inp[4]
+
+            #get the points from the image to perform interpolation on
+            interp_pts = tf.squeeze(tf.gather_nd(data, ind))
+
+            #multiply image values with the weights b ti interpolate original image onto the GL quadrature points
+            if data.shape[-1] == 1: #needed to handle if batch dimension is 1
+                interp_pts = tf.expand_dims(interp_pts, axis = 3)
+            values_at_quad_pts = tf.einsum('ijkl, ijk->ijl', interp_pts, b)
+
+            #compute Lp norm
+            return tf.pow(tf.reduce_sum(tf.einsum('ij,ijk->ijk',w,tf.pow(values_at_quad_pts, p)), axis = (0,1)), 1/p)
+
+        @tf.contrib.eager.defun
+        def Lp_integrate(y_true,y_pred, b=interpolation_weights, w=quadweights_list, ind=index_combinations_list, p=p, mse_component_weight = mse_component_weight):
+            '''
+            Split the batch, pack with the appropriate parameters and obtain the integrals
+            '''
+            if mse_component_weight == 0.0:
+                return tf.reduce_mean(tf.concat(list(map(Lp_integrate_batch, zip(tf.split(y_true-y_pred, len(b)), itertools.cycle(b), itertools.cycle(w), itertools.cycle(ind), itertools.repeat(p)))), 0))
+            else:
+                return tf.reduce_mean(mse_component_weight * tf.keras.losses.mean_squared_error(y_true,y_pred)) + tf.reduce_mean(tf.concat(list(map(Lp_integrate_batch, zip(tf.split(y_true-y_pred, len(b)), itertools.cycle(b), itertools.cycle(w), itertools.cycle(ind), itertools.repeat(p)))), 0))
     
-    @tf.contrib.eager.defun
-    def Lp_integrate_batch(inp):
-        '''
-        Helper function to facilitate quad pt randomization
-        
-        Given the bilinear interp. weights b, GL quad. weights w, Lp norm order p and the indices bounding each quad pt ind, computes the Lp norm for each channel/batch element
-        '''
-        #unpack values
-        data = tf.transpose(inp[0], (2,3,1,0))
-        b = inp[1]
-        w = inp[2]
-        ind = inp[3]
-        p = inp[4]
-        #print(w)
-        #get the points from the image to perform interpolation on
-        interp_pts = tf.squeeze(tf.gather_nd(data, ind))
-        #pdb.set_trace()
-        #multiply image values with the weights b ti interpolate original image onto the GL quadrature points
-        values_at_quad_pts = tf.einsum('ijkl, ijk->ijl', interp_pts, b)
-        #pdb.set_trace()
-        #compute Lp norm
-        return tf.pow(tf.reduce_sum(tf.einsum('ij,ijk->ijk',w,tf.pow(values_at_quad_pts, p)), axis = (0,1)), 1/p)
-    
-    @tf.contrib.eager.defun
-    def Lp_integrate(y_true,y_pred, b=interpolation_weights, w=quadweights_list, ind=index_combinations_list, p=p, mse_component_weight = mse_component_weight):
-        '''
-        Split the batch, pack with the appropriate parameters and obtain the integrals
-        '''
-        if mse_component_weight == 0.0:
-            return tf.reduce_mean(tf.concat(list(map(Lp_integrate_batch, zip(tf.split(y_true-y_pred, len(b)), itertools.cycle(b), itertools.cycle(w), itertools.cycle(ind), itertools.repeat(p)))), 0))
-        else:
-            return tf.reduce_mean(mse_component_weight * tf.keras.losses.mean_squared_error(y_true,y_pred)) + tf.reduce_mean(tf.concat(list(map(Lp_integrate_batch, zip(tf.split(y_true-y_pred, len(b)), itertools.cycle(b), itertools.cycle(w), itertools.cycle(ind), itertools.repeat(p)))), 0))
-        
+    else:
+        @tf.function
+        def Lp_integrate_batch(inp):
+            '''
+            Helper function to facilitate quad pt randomization
+
+            Given the bilinear interp. weights b, GL quad. weights w, Lp norm order p and the indices bounding each quad pt ind, computes the Lp norm for each channel/batch element
+            '''
+            #unpack values
+            data = tf.transpose(inp[0], (2,3,1,0))
+            b = inp[1]
+            w = inp[2]
+            ind = inp[3]
+            p = inp[4]
+            
+            #get the points from the image to perform interpolation on
+            interp_pts = tf.squeeze(tf.gather_nd(data, ind))
+
+            if data.shape[-1] == 1: #needed to handle if batch dimension is 1
+                interp_pts = tf.expand_dims(interp_pts, axis = 3)
+                
+            #multiply image values with the weights b ti interpolate original image onto the GL quadrature points
+            values_at_quad_pts = tf.einsum('ijkl, ijk->ijl', interp_pts, b)
+
+            #compute Lp norm
+            return tf.pow(tf.reduce_sum(tf.einsum('ij,ijk->ijk',w,tf.pow(values_at_quad_pts, p)), axis = (0,1)), 1/p)
+
+        @tf.function
+        def Lp_integrate(y_true,y_pred, b=interpolation_weights, w=quadweights_list, ind=index_combinations_list, p=p, mse_component_weight = mse_component_weight):
+            '''
+            Split the batch, pack with the appropriate parameters and obtain the integrals
+            '''
+            if mse_component_weight == 0.0:
+                return tf.reduce_mean(tf.concat(list(map(Lp_integrate_batch, zip(tf.split(y_true-y_pred, len(b)), itertools.cycle(b), itertools.cycle(w), itertools.cycle(ind), itertools.repeat(p)))), 0))
+            else:
+                return tf.reduce_mean(mse_component_weight * tf.keras.losses.mean_squared_error(y_true,y_pred)) + tf.reduce_mean(tf.concat(list(map(Lp_integrate_batch, zip(tf.split(y_true-y_pred, len(b)), itertools.cycle(b), itertools.cycle(w), itertools.cycle(ind), itertools.repeat(p)))), 0))
     return Lp_integrate
     
