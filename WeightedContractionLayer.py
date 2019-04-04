@@ -5,7 +5,7 @@ class WeightedContractionLayer(tf.keras.layers.Layer):
     '''
     Given the input tensor, this layer performs an einsum contraction with learnable weights on the input (i.e. the tensor the input is einsummed with is learnable)
     '''
-    def __init__(self, contraction_expression = None, new_weight_dims = None, contraction_expression_contains_batch_index = False, softmax_weights = True, **kwargs):
+    def __init__(self, contraction_expression = None, new_weight_dims = [], contraction_expression_contains_batch_index = False, softmax_weights = True, **kwargs):
         '''
         Init arguments
         
@@ -34,7 +34,7 @@ class WeightedContractionLayer(tf.keras.layers.Layer):
         
         #infer new axis weight lengths
         self.weight_shape = []
-        if (not new_weight_dims) and (self.new_indices != []):
+        if (new_weight_dims == []) and (self.new_indices != []):
             raise(ValueError('New weight dimensions must be not None if new dimensions are being created'))
         elif len(self.new_indices) != len(new_weight_dims):
             raise(ValueError('Supply exactly one size for every new dimension'))
