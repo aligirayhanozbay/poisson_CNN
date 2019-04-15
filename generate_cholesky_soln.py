@@ -72,8 +72,10 @@ def generate_random_RHS(n, n_controlpts = None, n_outputpts = None, supersample_
     except:
         n_controlpts = tf.ones(len(n_outputpts), dtype = tf.int32)*n_controlpts
     rand = 2*tf.random.uniform(list(n_controlpts) + [n], dtype = tf.keras.backend.floatx())-1
-    rhs = tf.Variable(tf.cast(tf.transpose(tf.image.resize_images(rand, n_outputpts[-2:], method=supersample_method, align_corners=True), [2,0,1]), dtype=tf.keras.backend.floatx()))
-
+    try:
+        rhs = tf.Variable(tf.cast(tf.transpose(tf.image.resize_images(rand, n_outputpts[-2:], method=supersample_method, align_corners=True), [2,0,1]), dtype=tf.keras.backend.floatx()))
+    except:
+        rhs = tf.Variable(tf.cast(tf.transpose(tf.compat.v1.image.resize_images(rand, n_outputpts[-2:], method=supersample_method, align_corners=True), [2,0,1]), dtype=tf.keras.backend.floatx()))
 
     if max_random_magnitude != np.inf:
         for i in range(int(rhs.shape[0])):
@@ -92,18 +94,30 @@ def poisson_RHS(F, boundaries = None, h = None):
     
     (i.e. this function merely takes the BC information and the (structured) RHS array to provide the RHS for the matrix eq. form)
     '''
-    
+    #print(F)
     if isinstance(F, Iterable):
         boundaries = F[1]
         h = F[2]
         F = F[0]
     
-    F = -h**2 * F
-    F[...,1:-1,1] = F[...,1:-1,1] + np.array(boundaries['top'])[1:-1]
-    F[...,1:-1,-2] = F[...,1:-1,-2] + np.array(boundaries['bottom'])[1:-1]
-    F[...,1,1:-1] = F[...,1,1:-1] + np.array(boundaries['left'])[1:-1]
-    F[...,-2,1:-1] = F[...,-2,1:-1] + np.array(boundaries['right'])[1:-1]
+    if isinstance(boundaries, dict):
+        boundaries = itertools.repeat(boundaries, F.shape[0])
+    if isinstance(h, float):
+        h = itertools.repeat(h, F.shape[0])
     
+    i = 0
+    it = zip(boundaries,h)
+    for i in range(F.shape[0]):
+        boundary_set, dx = next(it)
+        F[i] = -dx**2 * F[i]
+        F[i,...,1:-1,1] += np.array(boundary_set['top'])[1:-1]
+        F[i,...,1:-1,-2] += np.array(boundary_set['bottom'])[1:-1]
+        F[i,...,1,1:-1] += np.array(boundary_set['left'])[1:-1]
+        F[i,...,-2,1:-1] += np.array(boundary_set['right'])[1:-1]
+        if i == 0:
+            #print(F[i])
+            i += 1
+    #print(F[0,...])
     return F[...,1:-1,1:-1].reshape(list(F[...,1:-1,1:-1].shape[:-2]) + [np.prod(F[...,1:-1,1:-1].shape[-2:])], order = 'F') #Fortran reshape order important to preserve structure!
  
 def generate_dataset(batch_size, n, h, boundaries, smoothness_levels = 1, max_random_magnitude = 1.0, initial_smoothness = 5):
@@ -158,7 +172,7 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
         #@tf.function
         def chol_solve(rhs_arr):
             return tf.map_fn(chol, rhs_arr)
-    
+    #print(rhses.shape)
     try:
         rhs_vectors = tf.expand_dims(tf.transpose(tf.squeeze(poisson_RHS([np.array(rhses), boundaries, h])), (0,1)),axis=2)
     except:
