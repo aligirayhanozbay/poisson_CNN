@@ -137,7 +137,7 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
     
     Note: Not tested if this function works on CPU.
     '''
-    if not system_matrix:
+    if system_matrix == None:
         system_matrix = poisson_matrix(int(rhses.shape[-2]), int(rhses.shape[-1]))
         system_matrix_is_decomposed = False
     #import pdb
