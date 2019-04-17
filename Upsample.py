@@ -89,7 +89,7 @@ class Upsample2(tf.keras.layers.Layer):
             return tf.TensorShape([input_shape[0]] + new_shape + [input_shape[-1]])
         
     def call(self, inputs):
-        if isinstance(inputs, Iterable):
+        if isinstance(inputs, list) or isinstance(inputs, tuple):
             set_unknown_dims_as = inputs[1]
             inputs = inputs[0]
             newshape = self.get_newshape(inputs.shape)

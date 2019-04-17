@@ -20,7 +20,10 @@ def generate_laplace_soln(batch_size = 1, nx = None, ny = None, dx = None, smoot
     boundaries = {}
     for boundary in smoothness.keys():
         if boundary in nonzero_boundaries:
-            boundaries[boundary] = tf.Variable(tf.cast(tf.transpose(tf.squeeze(tf.image.resize_images(2*tf.random.uniform((smoothness[boundary],1,batch_size))-1,[boundary_lengths[boundary],1], method = tf.image.ResizeMethod.BICUBIC), axis = 1)), tf.keras.backend.floatx()))
+            try:
+                boundaries[boundary] = tf.Variable(tf.cast(tf.transpose(tf.squeeze(tf.image.resize_images(2*tf.random.uniform((smoothness[boundary],1,batch_size))-1,[boundary_lengths[boundary],1], method = tf.image.ResizeMethod.BICUBIC), axis = 1)), tf.keras.backend.floatx()))
+            except:
+                boundaries[boundary] = tf.Variable(tf.cast(tf.transpose(tf.squeeze(tf.compat.v1.image.resize_images(2*tf.random.uniform((smoothness[boundary],1,batch_size))-1,[boundary_lengths[boundary],1], method = tf.image.ResizeMethod.BICUBIC), axis = 1)), tf.keras.backend.floatx()))
             if max_random_magnitude != np.inf:
                 for i in range(int(boundaries[boundary].shape[0])):
                     scaling_factor = max_random_magnitude/tf.reduce_max(tf.abs(boundaries[boundary][i,:]))
