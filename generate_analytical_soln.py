@@ -54,7 +54,7 @@ def mode_coeff_calculation_multiprocessing_wrapper(args):
     
     return tf.constant(np.array(coefficients), dtype = tf.float64)
 
-def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], n_threads = 16, rhs_return = True, max_random_magnitude = np.inf, n_random = 1):
+def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], n_threads = 16, rhs_return = True, max_random_magnitude = np.inf, n_random = 1, expanded_dims = False):
     '''
     Generates an analytical solution to the Poisson equation with homogeneous Dirichlet (i.e. 0) Boundary conditions in the box x_1 = [0, L_1], ..., x_n = [0, L_n]
     Solution strategy is Fourier series based as outlined in
@@ -68,6 +68,7 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
     -n_threads: no of multiprocessing threads. useful only in non-random rhses
     -rhs_return: If set to true, it'll also return the RHS source term of the Poisson equation sampled at the same points as the solution
     -max_random_magnitude: If rhs is 'random', the solution will be scaled such that the maximum absolute value of the output will be this value.
+    -expanded_dims: if set to True, the values returned will have an extra axis of length 1 as the axis #1 (not #0!)
     '''
     
     
@@ -112,9 +113,15 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
         #print(np.median(maxminratio[np.abs(maxminratio) < 1e4]))
             
         if rhs_return:
-            return rhs, soln
+            if not expanded_dims:
+                return soln, rhs
+            else:
+                return tf.expand_dims(soln, axis = 1), tf.expand_dims(rhs, axis = 1)
         else:
-            return soln
+            if not expanded_dims:
+                return soln
+            else:
+                return tf.expand_dims(soln, axis = 1)
         
     elif callable(rhs):
         if np.prod(nmodes) % n_threads != 0:
@@ -132,9 +139,15 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
 
         
         if rhs_return:
-            return rhs(*coord_meshes), oe.contract('i,i...->...', soln_function_coeffs, sine_vals, backend = 'tensorflow')
+            if not expanded_dims:
+                return oe.contract('i,i...->...', soln_function_coeffs, sine_vals, backend = 'tensorflow'), rhs(*coord_meshes)
+            else:
+                return tf.expand_dims(oe.contract('i,i...->...', soln_function_coeffs, sine_vals, backend = 'tensorflow'), axis = 1), tf.expand_dims(rhs(*coord_meshes), axis = 1)
         else:
-            return oe.contract('i,i...->...', soln_function_coeffs, sine_vals, backend = 'tensorflow')
+            if not expanded_dims:
+                return oe.contract('i,i...->...', soln_function_coeffs, sine_vals, backend = 'tensorflow')
+            else:
+                return tf.expand_dims(oe.contract('i,i...->...', soln_function_coeffs, sine_vals, backend = 'tensorflow'), axis = 1)
     else:
         raise(TypeError('rhs must either be a callable function to be evaluated or random'))
         
@@ -193,7 +206,7 @@ if __name__ == '__main__':
     #res = pool.map(random_calculation_multiprocessing_wrapper, zip(itertools.repeat(batch_size, n_threads), itertools.repeat(params, n_threads)))
     #res = list(map(random_calculation_multiprocessing_wrapper, zip(itertools.repeat(batch_size, n_threads), itertools.repeat(params, n_threads))))
     #rhses, solns = zip(*list(map(random_calculation_multiprocessing_wrapper, itertools.repeat([batch_size, params], n_threads))))
-    rhses, solns = generate_analytical_solution_homogeneous_bc(**params)
+    solns, rhses = generate_analytical_solution_homogeneous_bc(**params)
     t1 = time.time()
     print('Generation of training data took ' + str(t1-t0) + ' seconds')
     #pool.close()
