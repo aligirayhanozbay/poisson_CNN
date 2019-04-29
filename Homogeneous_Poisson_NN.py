@@ -94,8 +94,8 @@ class Homogeneous_Poisson_NN_2(tf.keras.models.Model): #variant to include dx in
         self.conv_5 = tf.keras.layers.Conv2D(filters = 5, kernel_size = 3, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
         self.conv_6 = tf.keras.layers.Conv2D(filters = 1, kernel_size = 3, activation='linear', data_format=data_format, padding='same')
         
-        self.dx_dense_0 = tf.keras.layers.Dense(8, activation = tf.nn.relu)
-        self.dx_dense_1 = tf.keras.layers.Dense(16, activation = tf.nn.relu)
+        self.dx_dense_0 = tf.keras.layers.Dense(100, activation = tf.nn.relu)
+        self.dx_dense_1 = tf.keras.layers.Dense(100, activation = tf.nn.relu)
         self.dx_dense_2 = tf.keras.layers.Dense(16, activation = 'linear')
         
     def call(self, inp):
@@ -103,17 +103,19 @@ class Homogeneous_Poisson_NN_2(tf.keras.models.Model): #variant to include dx in
         inp = inp[0]
         out = self.conv_2(self.conv_1(inp))
         out = self.merge([self.conv_3(out)] + [pb(out) for pb in self.pooling_blocks])
-        return self.conv_6(self.conv_5(tf.einsum('ijkl, ij -> ijkl',self.conv_4(out), 1/(1+self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx)))))))
+        return self.conv_6(self.conv_5(tf.einsum('ijkl, ij -> ijkl',self.conv_4(out), 1.0*(0.0+self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx)))))))
 
     #@tf.function
     def integral_loss(self, y_true, y_pred):
-        if self.data_format == 'channels_first':
-            c = 0.5* tf.concat([self.dx * int(y_true.shape[-2]), self.dx * int(y_true.shape[-1])],1)
-            coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-2]),np.linspace(-1, 1, y_true.shape[-1]),indexing = 'xy'), dtype = np.float64).transpose((1,2,0)) #coordinates of each grid pt in the domain
-        else:
-            c = 0.5 * tf.concat([self.dx * int(y_true.shape[-3]), self.dx * int(y_true.shape[-2])],1)
-            coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-3]),np.linspace(-1, 1, y_true.shape[-2]),indexing = 'xy'), dtype = np.float64).transpose((1,2,0)) #coordinates of each grid pt in the domain
-        
+        try:
+            if self.data_format == 'channels_first':
+                c = 0.5* tf.concat([self.dx * int(y_true.shape[-2]), self.dx * int(y_true.shape[-1])],1)
+                coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-2]),np.linspace(-1, 1, y_true.shape[-1]),indexing = 'xy'), dtype = np.float64).transpose((1,2,0)) #coordinates of each grid pt in the domain
+            else:
+                c = 0.5 * tf.concat([self.dx * int(y_true.shape[-3]), self.dx * int(y_true.shape[-2])],1)
+                coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-3]),np.linspace(-1, 1, y_true.shape[-2]),indexing = 'xy'), dtype = np.float64).transpose((1,2,0)) #coordinates of each grid pt in the domain
+        except:
+            return 0.0*(y_true - y_pred)
         image_coords = [coords[0,:,0], coords[:,1,1]] #x and y coordinates separately
         quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(self.n_quadpts)[i].astype(np.float64) for i in range(2)])
 

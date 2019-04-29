@@ -145,11 +145,15 @@ def Lp_integral_norm(image_size, domain, n_quadpts = 10, quadpts_randomization =
             ind = inp[3]
             p = inp[4]
             
+            
             #get the points from the image to perform interpolation on
             interp_pts = tf.squeeze(tf.gather_nd(data, ind))
 
             if data.shape[-1] == 1: #needed to handle if batch dimension is 1
                 interp_pts = tf.expand_dims(interp_pts, axis = 3)
+            
+            if interp_pts.shape[0] == None:
+                interp_pts = tf.random.uniform(list(b.shape) + [100], dtype = tf.keras.backend.floatx())
                 
             #multiply image values with the weights b ti interpolate original image onto the GL quadrature points
             values_at_quad_pts = tf.einsum('ijkl, ijk->ijl', interp_pts, b)

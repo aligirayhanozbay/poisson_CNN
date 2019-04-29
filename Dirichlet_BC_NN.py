@@ -84,10 +84,10 @@ Model attempt 2
 
 '''
 class SepConvBlock(tf.keras.models.Model):
-    def __init__(self, data_format = 'channels_first', separable_kernel_size  = (5,256), nonsep_kernel_size = 5, separable_activation = tf.nn.leaky_relu, nonsep_activation = tf.nn.leaky_relu):
+    def __init__(self, data_format = 'channels_first', separable_kernel_size  = (5,256), nonsep_kernel_size = 5, separable_activation = tf.nn.leaky_relu, nonsep_activation = tf.nn.leaky_relu, separable_filters = 8, nonsep_filters = 4):
         super().__init__()
-        self.separableconv2d = tf.keras.layers.SeparableConv2D(8, kernel_size = separable_kernel_size, padding = 'same', activation = separable_activation, data_format = data_format)
-        self.conv2d = tf.keras.layers.Conv2D(filters = 4, kernel_size = nonsep_kernel_size, activation = nonsep_activation, padding = 'same', data_format = data_format)
+        self.separableconv2d = tf.keras.layers.SeparableConv2D(separable_filters, kernel_size = separable_kernel_size, padding = 'same', activation = separable_activation, data_format = data_format)
+        self.conv2d = tf.keras.layers.Conv2D(filters = nonsep_filters, kernel_size = nonsep_kernel_size, activation = nonsep_activation, padding = 'same', data_format = data_format)
         
     def call(self, inp):
         return self.conv2d(self.separableconv2d(inp))
@@ -121,6 +121,57 @@ class Dirichlet_BC_NN_2(tf.keras.models.Model):
         else:
             self.input_length = inputs.shape[-2]
         out = self.conv1d_2(self.conv1d_1(self.conv1d_0(inputs)))
+        if self.data_format == 'channels_first':
+            out = tf.expand_dims(out, axis = 1)
+            newshape = [self.x_output_resolution, self.input_length]
+        else:
+            out = tf.expand_dims(out, axis = 3)
+            newshape = [self.input_length, self.x_output_resolution]
+            
+        for scb in self.sepconvblocks_3:
+            out = scb(out)
+            
+        out = self.output_upsample_4([self.conv2d_4(out), newshape])
+        return self.conv2d_5(out)
+
+#best candidate
+class Dirichlet_BC_NN_2B(tf.keras.models.Model): #variant to include dx info
+    def __init__(self, data_format = 'channels_first', x_output_resolution = 256, n_sepconvblocks = 3):
+        super().__init__()
+        self.x_output_resolution = x_output_resolution
+        self.data_format = data_format
+        self.conv1d_0 = tf.keras.layers.Conv1D(filters=4, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
+        
+        self.conv1d_1 = tf.keras.layers.Conv1D(filters=8, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
+        
+        self.conv1d_2 = tf.keras.layers.Conv1D(filters=256, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
+        
+        if data_format == 'channels_first':
+            sepconvkernelshape = (256,5)
+        else:
+            sepconvkernelshape = (5,256)
+        self.sepconvblocks_3 = [SepConvBlock(data_format = data_format, separable_kernel_size = sepconvkernelshape, separable_filters = 24, nonsep_filters = 24) for i in range(n_sepconvblocks)]
+        
+        self.conv2d_4 = tf.keras.layers.Conv2D(filters = 8, kernel_size = 5, activation = tf.nn.leaky_relu, padding = 'same', data_format = data_format)
+        
+        self.output_upsample_4 = Upsample2([-1, -1], data_format = data_format , resize_method = tf.image.ResizeMethod.BICUBIC)
+        
+        self.conv2d_5 = tf.keras.layers.Conv2D(filters = 1, kernel_size = 9, activation = tf.tanh, padding = 'same', data_format = data_format)
+        
+        self.dx_dense_0 = tf.keras.layers.Dense(4, activation = tf.nn.relu)
+        self.dx_dense_1 = tf.keras.layers.Dense(4, activation = tf.nn.relu)
+        self.dx_dense_2 = tf.keras.layers.Dense(8, activation = tf.nn.softmax)
+    def call(self, inputs):
+        dx_res = 1/(1e-8 + 10 * self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(inputs[1]))))
+        
+        if self.data_format == 'channels_first':
+            self.input_length = inputs[0].shape[-1]
+            contr_expr = 'ijk,ij->ijk'
+        else:
+            self.input_length = inputs[0].shape[-2]
+            contr_expr = 'ikj,ij->ikj'
+        out = self.conv1d_2(tf.einsum(contr_expr, self.conv1d_1(self.conv1d_0(inputs[0])), dx_res))
+        
         if self.data_format == 'channels_first':
             out = tf.expand_dims(out, axis = 1)
             newshape = [self.x_output_resolution, self.input_length]

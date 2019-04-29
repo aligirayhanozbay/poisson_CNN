@@ -134,7 +134,8 @@ def generate_dataset(batch_size, n, h, boundaries, smoothness_levels = 1, max_ra
     Outputs a tf.Tensor of shape (batch_size * smoothness_levels, n[0], n[1])
     '''
     F = tf.concat(list(map(generate_random_RHS, zip(itertools.repeat(batch_size, smoothness_levels), itertools.cycle(np.arange(initial_smoothness, initial_smoothness + smoothness_levels)), itertools.repeat((n[0],n[1])), itertools.repeat(tf.image.ResizeMethod.BICUBIC) ,itertools.repeat(max_random_magnitude)))), axis=0)
-    #print('RHSes generated.')
+    if __name__ == '__main__':
+        print('RHSes generated.')
     return tf.expand_dims(cholesky_poisson_solve(F, boundaries,h), axis = 1), tf.expand_dims(F, axis = 1)
 
 def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_matrix_is_decomposed = False):
