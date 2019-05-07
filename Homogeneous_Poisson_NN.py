@@ -6,6 +6,27 @@ from Lp_integral_norm import Lp_integral_norm
 import itertools
 import opt_einsum as oe
 
+def channels_first_rot_90(image,k=1):
+    if len(image.shape) == 4:
+        image = tf.transpose(image, (0,2,3,1))
+    elif len(image.shape) == 3:
+        image = tf.transpose(image, (0,2,1))
+        image_was_rank3 = True
+    elif len(image.shape) == 2:
+        image = tf.expand_dims(image, axis = 2)
+        image_was_rank3 = False
+    else:
+        raise ValueError('image must be a rank 2,3 or 4 Tensor')
+    
+    image = tf.image.rot90(image, k = k)
+    
+    if len(image.shape) == 4:
+        return tf.transpose(image, (0,3,1,2))
+    elif image_was_rank3:
+        return tf.transpose(image, (0,2,1))
+    else:
+        return image[...,0]
+
 class AveragePoolingBlock(tf.keras.models.Model):
     def __init__(self, pool_size = 2, data_format = 'channels_first', filters = 8, activation = tf.nn.leaky_relu, resize_method = tf.image.ResizeMethod.BICUBIC, kernel_size = 3):
         super().__init__()
