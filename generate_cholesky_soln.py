@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 import tensorflow as tf
 from scipy.interpolate import RectBivariateSpline
 from collections.abc import Iterable
@@ -96,28 +97,47 @@ def poisson_RHS(F, boundaries = None, h = None):
     '''
     #print(F)
     if isinstance(F, Iterable):
-        boundaries = F[1]
+        boundaries =  copy.deepcopy(F[1])
         h = F[2]
         F = F[0]
     
-    if isinstance(boundaries, dict):
-        boundaries = itertools.repeat(boundaries, F.shape[0])
+    for key in boundaries.keys():
+        if len(boundaries[key].shape) > 1:
+            boundaries[key] = tf.squeeze(boundaries[key])
+        if len(boundaries[key].shape) == 1:
+            boundaries[key] = itertools.repeat(boundaries[key], F.shape[0])
+    
+#     if isinstance(boundaries, dict):
+#         boundaries = itertools.repeat(boundaries, F.shape[0])
     if isinstance(h, float):
         h = itertools.repeat(h, F.shape[0])
     
-    i = 0
-    it = zip(boundaries,h)
     for i in range(F.shape[0]):
-        boundary_set, dx = next(it)
+        try:
+            dx = next(h)
+        except:
+            dx = h[i]
         F[i] = -dx**2 * F[i]
-        F[i,...,1:-1,1] += np.array(boundary_set['top'])[1:-1]
-        F[i,...,1:-1,-2] += np.array(boundary_set['bottom'])[1:-1]
-        F[i,...,1,1:-1] += np.array(boundary_set['left'])[1:-1]
-        F[i,...,-2,1:-1] += np.array(boundary_set['right'])[1:-1]
-        if i == 0:
-            #print(F[i])
-            i += 1
-    #print(F[0,...])
+        try:
+            F[i,...,1:-1,1] += boundaries['top'][i,1:-1]
+        except:
+            F[i,...,1:-1,1] += next(boundaries['top'])[1:-1]
+            
+        try:
+            F[i,...,1:-1,-2] += boundaries['bottom'][i,1:-1]
+        except:
+            F[i,...,1:-1,-2] += next(boundaries['bottom'])[1:-1]
+            
+        try:
+            F[i,...,1,1:-1] += boundaries['left'][i,1:-1]
+        except:
+            F[i,...,1,1:-1] += next(boundaries['left'])[1:-1]
+            
+        try:
+            F[i,...,-2,1:-1] += boundaries['right'][i,1:-1]
+        except:
+            F[i,...,-2,1:-1] += next(boundaries['right'])[1:-1]
+
     return F[...,1:-1,1:-1].reshape(list(F[...,1:-1,1:-1].shape[:-2]) + [np.prod(F[...,1:-1,1:-1].shape[-2:])], order = 'F') #Fortran reshape order important to preserve structure!
  
 def generate_dataset(batch_size, n, h, boundaries, smoothness_levels = 1, max_random_magnitude = 1.0, initial_smoothness = 5):
@@ -136,7 +156,7 @@ def generate_dataset(batch_size, n, h, boundaries, smoothness_levels = 1, max_ra
     F = tf.concat(list(map(generate_random_RHS, zip(itertools.repeat(batch_size, smoothness_levels), itertools.cycle(np.arange(initial_smoothness, initial_smoothness + smoothness_levels)), itertools.repeat((n[0],n[1])), itertools.repeat(tf.image.ResizeMethod.BICUBIC) ,itertools.repeat(max_random_magnitude)))), axis=0)
     if __name__ == '__main__':
         print('RHSes generated.')
-    return tf.expand_dims(cholesky_poisson_solve(F, boundaries,h), axis = 1), tf.expand_dims(F, axis = 1)
+    return cholesky_poisson_solve(F, boundaries,h), tf.expand_dims(F, axis = 1)
 
 def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_matrix_is_decomposed = False):
     '''
@@ -152,8 +172,20 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
     
     Note: Not tested if this function works on CPU.
     '''
+    try: #handle spurious 1 dimensions
+        rhses = tf.squeeze(rhses, axis = 1)
+    except:
+        pass
+    boundaries = copy.deepcopy(boundaries)
+    for boundary in boundaries.keys():
+        try:
+            boundaries[boundary] = tf.squeeze(boundaries[boundary], axis = 1)
+        except:
+            pass
+    
+    #generate poisson matrix, or use the provided one
     if system_matrix == None:
-        system_matrix = poisson_matrix(int(rhses.shape[-2]), int(rhses.shape[-1]))
+        system_matrix = tf.cast(poisson_matrix(int(rhses.shape[-2]), int(rhses.shape[-1])), tf.keras.backend.floatx())
         system_matrix_is_decomposed = False
     #import pdb
     #pdb.set_trace()
@@ -166,19 +198,21 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
         return tf.linalg.cholesky_solve(system_matrix_chol, tf.expand_dims(r, axis = 0))
     
     try:
-        #@tf.contrib.eager.defun
+        @tf.contrib.eager.defun
         def chol_solve(rhs_arr):
             return tf.map_fn(chol, rhs_arr)
     except:
-        #@tf.function
+        @tf.function
         def chol_solve(rhs_arr):
             return tf.map_fn(chol, rhs_arr)
-    #print(rhses.shape)
+    
+    #put problem into Ax=b format
     try:
         rhs_vectors = tf.expand_dims(tf.transpose(tf.squeeze(poisson_RHS([np.array(rhses), boundaries, h])), (0,1)),axis=2)
     except:
         rhs_vectors = tf.expand_dims(tf.expand_dims(tf.squeeze(poisson_RHS([np.array(rhses), boundaries, h])),axis=1), axis=0)
     
+    #solve and reshape
     z = tf.reshape(chol_solve(rhs_vectors), list(rhses.shape[:-2]) + [int(rhses.shape[-1])-2, int(rhses.shape[-2])-2])
     z = tf.transpose(z, list(range(len(z.shape[:-2]))) + [len(z.shape)-1, len(z.shape)-2])
     
@@ -189,14 +223,16 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
     soln[...,-1,:] = boundaries['right']
     soln[...,1:-1,1:-1] = z
     
-    return soln         
+    return tf.expand_dims(soln, axis = 1)
 
 if __name__ == '__main__':
-    opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)
-    conf = tf.ConfigProto(gpu_options=opts)
-    tf.enable_eager_execution(config=conf)
+    try:
+        opts = tf.GPUOptions(per_process_gpu_memory_fraction=0.925)
+        conf = tf.ConfigProto(gpu_options=opts)
+        tf.enable_eager_execution(config=conf)
+    except:
+        pass
     tf.keras.backend.set_floatx('float64')
-    
     import argparse
     #_, outputpath, ntest, h, batch_size, n_batches = sys.argv
     parser = argparse.ArgumentParser(description = "Generate a series of Poisson equation RHS-solution pairs with specified Dirichlet boundary conditions on rectangular domains")
