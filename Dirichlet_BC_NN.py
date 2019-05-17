@@ -7,8 +7,15 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    '''
+    Abstract class to implement integral loss.
+    '''
+    def __init__(self, mae_component_weight = 0.0, mse_component_weight = 0.0, n_quadpts= 20, Lp_norm_power = 2, **kwargs):
+        super().__init__( **kwargs)
+        self.mae_component_weight = mae_component_weight
+        self.mse_component_weight = mse_component_weight
+        self.n_quadpts = n_quadpts
+        self.p = Lp_norm_power
 
     def integral_loss(self, y_true, y_pred):
         try: #try except block to handle keras model init shenanigans
@@ -102,12 +109,8 @@ class SepConvBlock(tf.keras.models.Model):
 
 #best candidate
 class Dirichlet_BC_NN_2B(Model_With_Integral_Loss_ABC): #variant to include dx info
-    def __init__(self, data_format = 'channels_first', x_output_resolution = 256, n_sepconvblocks = 3, mae_component_weight = 0.0, mse_component_weight = 0.0, n_quadpts= 20, Lp_norm_power = 2):
-        super().__init__()
-        self.mae_component_weight = mae_component_weight
-        self.mse_component_weight = mse_component_weight
-        self.n_quadpts = n_quadpts
-        self.p = Lp_norm_power
+    def __init__(self, data_format = 'channels_first', x_output_resolution = 256, n_sepconvblocks = 3, **kwargs):
+        super().__init__(**kwargs)
         self.x_output_resolution = x_output_resolution
         self.data_format = data_format
         self.conv1d_0 = tf.keras.layers.Conv1D(filters=4, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
@@ -157,12 +160,8 @@ class Dirichlet_BC_NN_2B(Model_With_Integral_Loss_ABC): #variant to include dx i
         return self.conv2d_5(out)
     
 class Dirichlet_BC_NN_2C(Model_With_Integral_Loss_ABC): #variant to include dx AND Lx/Ly info
-    def __init__(self, data_format = 'channels_first', x_output_resolution = 256, n_sepconvblocks = 3, mae_component_weight = 0.0, mse_component_weight = 0.0, n_quadpts= 20, Lp_norm_power = 2):
-        super().__init__()
-        self.mae_component_weight = mae_component_weight
-        self.mse_component_weight = mse_component_weight
-        self.n_quadpts = n_quadpts
-        self.p = Lp_norm_power
+    def __init__(self, data_format = 'channels_first', x_output_resolution = 256, n_sepconvblocks = 3, **kwargs):
+        super().__init__(**kwargs)
         self.x_output_resolution = x_output_resolution
         self.data_format = data_format
         self.conv1d_0 = tf.keras.layers.Conv1D(filters=8, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
@@ -242,3 +241,107 @@ class Dirichlet_BC_NN_2C(Model_With_Integral_Loss_ABC): #variant to include dx A
             
             out = self.output_upsample_4([self.conv2d_4_2(self.conv2d_4_1(self.conv2d_4_0(out))), newshape])
             return self.conv2d_5_1(self.conv2d_5_0(out))
+
+class ResnetBlock(tf.keras.models.Model):
+    def __init__(self, data_format = 'channels_first', **conv_layer_args):
+        super().__init__()
+        self.conv0 = tf.keras.layers.Conv2D(padding = 'same', data_format = data_format, **conv_layer_args)
+        self.conv1 = tf.keras.layers.Conv2D(padding = 'same', data_format = data_format, **conv_layer_args)
+
+    def call(self, inp):
+        return inp + self.conv0(self.conv1(inp))
+        
+class ResampledConvolutionBlock(tf.keras.models.Model):
+    def __init__(self, resample_arg, data_format = 'channels_first', resize_method = tf.image.ResizeMethod.BICUBIC, use_resnetblocks = True, pre_upsample_conv_blocks = 2, post_upsample_conv_blocks = 2, **convblockargs):
+        super().__init__()
+        self.data_format = data_format
+        self.resample = Upsample2(resample_arg, data_format = data_format, resize_method = resize_method)
+        self.resize_to_original_shape = Upsample2([-1, -1], data_format = data_format)
+        if use_resnetblocks:
+            self.pre_upsample_conv_blocks = [ResnetBlock(data_format = data_format, **convblockargs) for i in range(pre_upsample_conv_blocks)]
+            self.post_upsample_conv_blocks = [ResnetBlock(data_format = data_format, **convblockargs) for i in range(post_upsample_conv_blocks)]
+        else:
+            self.pre_upsample_conv_blocks = [tf.keras.layers.Conv2D(data_format = data_format, **convblockargs) for i in range(pre_upsample_conv_blocks)]
+            self.post_upsample_conv_blocks = [tf.keras.layers.Conv2D(data_format = data_format, **convblockargs) for i in range(post_upsample_conv_blocks)]
+        
+    def call(self, inp):
+        if self.data_format == 'channels_first':
+            original_shape = [inp.shape[2], inp.shape[3]]
+        else:
+            original_shape = [inp.shape[1], inp.shape[2]]
+        out = self.resample(inp)
+        for convblock in self.pre_upsample_conv_blocks:
+            out = convblock(out)
+        out = self.resize_to_original_shape([out, original_shape])
+        for convblock in self.post_upsample_conv_blocks:
+            out = convblock(out)
+        return out
+                                                  
+class Dirichlet_BC_NN_2D(Model_With_Integral_Loss_ABC):
+    def __init__(self, data_format = 'channels_first', x_output_resolution = 256, **kwargs):
+        super().__init__(**kwargs)
+        self.x_output_resolution = x_output_resolution
+        self.data_format = data_format
+        
+        self.conv1d_0 = tf.keras.layers.Conv1D(filters=8, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
+        self.conv1d_1 = tf.keras.layers.Conv1D(filters=64, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
+        self.conv1d_2 = tf.keras.layers.Conv1D(filters=256, kernel_size=5, padding='same', activation=tf.nn.leaky_relu, data_format = data_format)
+        self.resnetblocks_0 = [ResnetBlock(data_format = data_format, filters = 16, kernel_size = 5, activation = tf.nn.leaky_relu) for i in range(3)]
+                                                  
+        self.dx_dense_0 = tf.keras.layers.Dense(100, activation = tf.nn.leaky_relu)
+        self.dx_dense_1 = tf.keras.layers.Dense(256, activation = tf.nn.leaky_relu)
+        self.dx_dense_2 = tf.keras.layers.Dense(32*128, activation = tf.nn.leaky_relu)
+        self.dx_resampled_conv_blocks = [ResampledConvolutionBlock([0.5**i, 0.5**i], data_format = data_format, filters = 16, kernel_size = 3, activation = tf.nn.leaky_relu) for i in range(4)]
+        self.dx_upsample = Upsample2([-1, -1], data_format = data_format)
+
+        self.resnetblocks_1 = [ResnetBlock(data_format = data_format, filters = 16, kernel_size = 5, activation = tf.nn.leaky_relu) for i in range(3)]
+        
+        self.conv2d_0 = tf.keras.layers.Conv2D(filters = 8, kernel_size = 5, activation = tf.nn.leaky_relu, padding = 'same', data_format = data_format)
+        self.conv2d_1 = tf.keras.layers.Conv2D(filters = 4, kernel_size = 5, activation = tf.nn.leaky_relu, padding = 'same', data_format = data_format)
+        self.conv2d_2 = tf.keras.layers.Conv2D(filters = 1, kernel_size = 5, activation = tf.nn.tanh, padding = 'same', data_format = data_format)
+                                            
+    def call(self, inputs):
+        self.dx = inputs[1]
+        out = self.conv1d_2(self.conv1d_1(self.conv1d_0(inputs[0])))
+        try:
+            self.x_output_resolution = inputs[2]
+        except:
+            pass
+        
+        try: #stupid hack 1 to get past keras '?' tensor dimensions via try except block
+            if self.data_format == 'channels_first':
+                self.domain_info = oe.contract('ij,j->ij',tf.tile(inputs[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(self.x_output_resolution, tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[2]), tf.keras.backend.floatx())], axis = 0), backend = 'tensorflow')
+                self.input_length = inputs[0].shape[-1]
+                out = tf.expand_dims(out, axis = 1)
+                dx_res = tf.reshape(self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info))), (-1, 1, 128, 32))
+            else:
+                self.domain_info = oe.contract('ij,j->ij',tf.tile(inputs[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(self.x_output_resolution, tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[1]), tf.keras.backend.floatx())], axis = 0), backend = 'tensorflow')
+                self.input_length = inputs[0].shape[-2]
+                out = tf.expand_dims(out, axis = 3)
+                dx_res = tf.reshape(self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info))), (-1, 128, 32, 1))
+        except:
+            if self.data_format == 'channels_first':
+                self.domain_info = tf.tile(inputs[1], [1,3])
+                self.input_length = inputs[0].shape[-1]
+                out = tf.expand_dims(out, axis = 1)
+                dx_res = tf.reshape(self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info))), (-1, 1, 128, 32))
+            else:
+                self.domain_info = tf.tile(inputs[1], [1,3])
+                self.input_length = inputs[0].shape[-2]
+                out = tf.expand_dims(out, axis = 3)
+                dx_res = tf.reshape(self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info))), (-1, 128, 32, 1))
+        
+        for rb in self.resnetblocks_0:
+            out = rb(out)
+        try:
+            out = self.dx_upsample([sum([rcb(dx_res) for rcb in self.dx_resampled_conv_blocks]), [self.x_output_resolution, self.input_length]]) + self.dx_upsample([out, [self.x_output_resolution, self.input_length]])
+        except:
+            out = self.dx_upsample([sum([rcb(dx_res) for rcb in self.dx_resampled_conv_blocks]), [64, self.input_length]]) + self.dx_upsample([out, [64, self.input_length]])
+        for rb in self.resnetblocks_1:
+            out = rb(out)
+
+        return self.conv2d_2(self.conv2d_1(self.conv2d_0(out)))
+
+            
+        
+        
