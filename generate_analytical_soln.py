@@ -25,9 +25,9 @@ class integrator_nd:
     def __init__(self, domain = [0,1,0,1], n_quadpts = 20):
         ndims = len(domain)//2
         quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(n_quadpts)[i].astype(np.float64) for i in range(2)]) #quadrature weights and points
-        c = tf.constant(np.array([np.array(0.5*(domain[n+1] - domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]), dtype = tf.float64) #scaling coefficients - for handling domains other than [-1,1] x [-1,1]
-        d = tf.constant(np.array([np.array(0.5*(domain[n+1] + domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]), dtype = tf.float64)
-        self.quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, oe.contract('i...,i->i...',tf.stack(np.meshgrid(*list(itertools.repeat(quadrature_x,ndims)),indexing = 'xy'), axis=0),c, backend = 'tensorflow')).transpose(list(np.arange(1,ndims+1)) + [0]),dtype = tf.float64)
+        c = tf.constant(np.array([np.array(0.5*(domain[n+1] - domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]), dtype = tf.keras.backend.floatx()) #scaling coefficients - for handling domains other than [-1,1] x [-1,1]
+        d = tf.constant(np.array([np.array(0.5*(domain[n+1] + domain[n]),dtype=np.float64) for n in range(0,len(domain),2)]), dtype = tf.keras.backend.floatx())
+        self.quadpts = tf.constant(np.apply_along_axis(lambda x: x + d, 0, oe.contract('i...,i->i...',tf.stack(np.meshgrid(*list(itertools.repeat(quadrature_x,ndims)),indexing = 'xy'), axis=0),c, backend = 'tensorflow')).transpose(list(np.arange(1,ndims+1)) + [0]),dtype = tf.keras.backend.floatx())
     
         self.quadweights = tf.reduce_prod(c)*quadrature_w
     
@@ -50,9 +50,9 @@ def mode_coeff_calculation_multiprocessing_wrapper(args):
     coefficients = []
     for i in range(int(mplus1_pi_over_L.shape[0])):
         integrand = lambda *vars: F(*vars) * tf.reduce_prod(tf.sin(oe.contract('i...,i->i...',tf.stack(vars),mplus1_pi_over_L[i],backend = 'tensorflow')),axis=0)
-        coefficients.append(-integrator(integrand) * tf.cast(two_to_the_power_ndims,tf.float64) / (tf.cast(domain_volume,tf.float64) * tf.reduce_sum(tf.square(mplus1_pi_over_L[i]))))
+        coefficients.append(-integrator(integrand) * tf.cast(two_to_the_power_ndims,tf.keras.backend.floatx()) / (tf.cast(domain_volume,tf.keras.backend.floatx()) * tf.reduce_sum(tf.square(mplus1_pi_over_L[i]))))
     
-    return tf.constant(np.array(coefficients), dtype = tf.float64)
+    return tf.constant(np.array(coefficients), dtype = tf.keras.backend.floatx())
 
 def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], n_threads = 16, rhs_return = True, max_random_magnitude = np.inf, n_random = 1, expanded_dims = False):
     '''
@@ -80,11 +80,11 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
     #for i in args:
     #    print(i + ' = ' + str(values[i]))
     
-    coords = [tf.linspace(tf.constant(0.0,dtype = tf.float64),domain[i], output_shape[i]) for i in range(len(output_shape))] #Evaluate coordinates along each axis
+    coords = [tf.linspace(tf.constant(0.0,dtype = tf.keras.backend.floatx()),domain[i], output_shape[i]) for i in range(len(output_shape))] #Evaluate coordinates along each axis
     coord_meshes = tf.stack(tf.meshgrid(*coords)) #Create meshgrid
     ndims = len(domain) #No of dims of function
-    mode_permutations = tf.constant(np.array(list(itertools.product(*[np.arange(nmodes[i]) for i in range(len(nmodes))]))), dtype = tf.float64) #Every permutation of Fourier modes along different axes possible
-    mplus1_pi_over_L = oe.contract('j,ij->ij',tf.constant(domain, dtype = tf.float64)**(-1),(mode_permutations + 1)*np.pi, backend = 'tensorflow') #compute (m_i+1)*pi/L_i
+    mode_permutations = tf.constant(np.array(list(itertools.product(*[np.arange(nmodes[i]) for i in range(len(nmodes))]))), dtype = tf.keras.backend.floatx()) #Every permutation of Fourier modes along different axes possible
+    mplus1_pi_over_L = oe.contract('j,ij->ij',tf.constant(domain, dtype = tf.keras.backend.floatx())**(-1),(mode_permutations + 1)*np.pi, backend = 'tensorflow') #compute (m_i+1)*pi/L_i
     #print(mplus1_pi_over_L)
     #print(coord_meshes)
     sine_vals = tf.reduce_prod(tf.sin(oe.contract('ij,j...->ij...', mplus1_pi_over_L, coord_meshes, backend = 'tensorflow')),axis=1) #sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
@@ -94,7 +94,7 @@ def generate_analytical_solution_homogeneous_bc(rhs = 'random', output_shape = (
         #\int_0^{L_n} ... \int_0^{L_1} F * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n) dx_1 ... dx_n = A*L_1*...*L_n/2^n
         #Thus the solution to the Poisson equation \nabla^2 u = F will be u = a_{m_1,...,m_n} * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
         #where a_{m_1,...,m_n} = -A_{m_1,...,m_n} * /(((m_1+1)*pi/L_1)^2+...+((m_n+1)*pi/L_n)^2)
-        rhs_function_coeffs = oe.contract('ij,j->ij',2*tf.random.uniform(tf.stack([n_random, mode_permutations.shape[0]]),dtype = tf.float64)-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.float64),axis=1)), backend = 'tensorflow') #Random RHS function Fourier coefficients
+        rhs_function_coeffs = oe.contract('ij,j->ij',2*tf.random.uniform(tf.stack([n_random, mode_permutations.shape[0]]),dtype = tf.keras.backend.floatx())-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.keras.backend.floatx()),axis=1)), backend = 'tensorflow') #Random RHS function Fourier coefficients
         soln_function_coeffs = -oe.contract('ij,j->ij',rhs_function_coeffs, tf.reduce_sum(tf.square(mplus1_pi_over_L),axis=1)**(-1), backend = 'tensorflow') #Random solution Fourier coefficients
         
         
