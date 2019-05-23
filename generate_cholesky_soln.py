@@ -2,7 +2,7 @@ import numpy as np
 import copy
 import tensorflow as tf
 from scipy.interpolate import RectBivariateSpline
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from Boundary import Boundary1D
 import itertools, h5py, os, sys, time
 from multiprocessing import Pool as ThreadPool
@@ -86,20 +86,29 @@ def generate_random_RHS(n, n_controlpts = None, n_outputpts = None, supersample_
     return rhs
     
 
-def poisson_RHS(F, boundaries = None, h = None):
+def poisson_RHS(F, boundaries = None, h = None, rho = None):
     '''
     Generates the RHS vector b of a discretized Poisson problem in the form Ax=b.
-    h = grid spacing
+    h = grid spacing. if not supplied, the RHS will be returned without the (delta x)^2 factor. necessary for nonuniform grid spacing.
     boundaries = dict containing entries 'top', 'bottom', 'right' and 'left' which correspond to the Dirichlet BCs at these boundaries. Each entry must be a vector of length m or n, where m and n are defined as in te function poisson_matrix
     F = an m by n matrix containing the RHS values of the Poisson equation
     
     (i.e. this function merely takes the BC information and the (structured) RHS array to provide the RHS for the matrix eq. form)
     '''
     #print(F)
-    if isinstance(F, Iterable):
-        boundaries =  copy.deepcopy(F[1])
-        h = F[2]
+    if isinstance(F, list):
+        boundaries = F[1]
+        try:
+            h = F[2]
+        except:
+            pass
+        try:
+            rho = F[3]
+        except:
+            pass
         F = F[0]
+    
+    boundaries = copy.deepcopy(boundaries)
     
     for key in boundaries.keys():
         if len(boundaries[key].shape) > 1:
@@ -107,36 +116,48 @@ def poisson_RHS(F, boundaries = None, h = None):
         if len(boundaries[key].shape) == 1:
             boundaries[key] = itertools.repeat(boundaries[key], F.shape[0])
     
-#     if isinstance(boundaries, dict):
-#         boundaries = itertools.repeat(boundaries, F.shape[0])
-    if isinstance(h, float):
+    if (h is not None) and isinstance(h, float):
         h = itertools.repeat(h, F.shape[0])
     
     for i in range(F.shape[0]):
-        try:
-            dx = next(h)
-        except:
-            dx = h[i]
-        F[i] = -dx**2 * F[i]
-        try:
-            F[i,...,1:-1,1] += boundaries['top'][i,1:-1]
-        except:
-            F[i,...,1:-1,1] += next(boundaries['top'])[1:-1]
+        if h is not None:
+            try:
+                dx = next(h)
+            except:
+                dx = h[i]
+            F[i] = -dx**2 * F[i]
+                
+        
+        if isinstance(boundaries['top'], Iterator):
+            top = next(boundaries['top'])[1:-1] 
+        else:
+            top = boundaries['top'][i,1:-1]
             
-        try:
-            F[i,...,1:-1,-2] += boundaries['bottom'][i,1:-1]
-        except:
-            F[i,...,1:-1,-2] += next(boundaries['bottom'])[1:-1]
+        if isinstance(boundaries['bottom'], Iterator):
+            bottom = next(boundaries['bottom'])[1:-1]
+        else:
+            bottom = boundaries['bottom'][i,1:-1]
             
-        try:
-            F[i,...,1,1:-1] += boundaries['left'][i,1:-1]
-        except:
-            F[i,...,1,1:-1] += next(boundaries['left'])[1:-1]
+        if isinstance(boundaries['left'], Iterator):
+            left = next(boundaries['left'])[1:-1]
+        else:
+            left = boundaries['left'][i,1:-1]
             
-        try:
-            F[i,...,-2,1:-1] += boundaries['right'][i,1:-1]
-        except:
-            F[i,...,-2,1:-1] += next(boundaries['right'])[1:-1]
+        if isinstance(boundaries['right'], Iterator):
+            right = next(boundaries['right'])[1:-1]
+        else:
+            right = boundaries['right'][i,1:-1]
+            
+        if rho is not None:
+            top *= rho[i,...,1:-1,1]
+            bottom *= rho[i,...,1:-1,-2]
+            left *= rho[i,...,1,1:-1]
+            right *= rho[i,...,-2,1:-1]
+        
+        F[i,...,1:-1,1] += top
+        F[i,...,1:-1,-2] += bottom
+        F[i,...,1,1:-1] += left
+        F[i,...,-2,1:-1] += right
 
     return F[...,1:-1,1:-1].reshape(list(F[...,1:-1,1:-1].shape[:-2]) + [np.prod(F[...,1:-1,1:-1].shape[-2:])], order = 'F') #Fortran reshape order important to preserve structure!
  
