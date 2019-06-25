@@ -3,7 +3,6 @@ import numpy as np
 from Dirichlet_BC_NN import Model_With_Integral_Loss_ABC, ResampledConvolutionBlock, ResnetBlock
 from MergeWithAttention import MergeWithAttention2
 from Upsample import Upsample2
-from Lp_integral_norm import Lp_integral_norm
 import itertools
 import opt_einsum as oe
 
@@ -82,6 +81,7 @@ class Homogeneous_Poisson_NN_2(Model_With_Integral_Loss_ABC): #variant to includ
         self.dx_dense_0 = tf.keras.layers.Dense(100, activation = tf.nn.relu)
         self.dx_dense_1 = tf.keras.layers.Dense(100, activation = tf.nn.relu)
         self.dx_dense_2 = tf.keras.layers.Dense(16, activation = 'linear')
+
         
     def call(self, inp):
         self.dx = inp[1]
@@ -92,7 +92,7 @@ class Homogeneous_Poisson_NN_2(Model_With_Integral_Loss_ABC): #variant to includ
 
 from SpatialPyramidPool import SpatialPyramidPool
 class Homogeneous_Poisson_NN_3(Model_With_Integral_Loss_ABC): #variant to include dx info
-    def __init__(self, resnet_block_number = 6, filters = [8,16,32,64,16,8], kernel_sizes = [5,5,5,5,5,5], nmodes = (32,32), pyramid_pooling_params = {'levels': [[3,3],6,9,12], 'pooling_type': 'AVG'}, resize_methods = None, data_format = 'channels_first', **kwargs):
+    def __init__(self, resnet_block_number = 6, filters = [8,16,32,64,16,8], kernel_sizes = [5,5,5,5,5,5], nmodes = (32,32), pyramid_pooling_params = {'levels': [[3,3],6,9,12], 'pooling_type': 'AVG'}, data_format = 'channels_first', **kwargs):
         super().__init__(**kwargs)
         self.data_format = data_format
         self.resnet_blocks = []
@@ -110,48 +110,43 @@ class Homogeneous_Poisson_NN_3(Model_With_Integral_Loss_ABC): #variant to includ
         self.fourier_dense_0 = tf.keras.layers.Dense(250, activation = tf.nn.leaky_relu)
         self.fourier_dense_1 = tf.keras.layers.Dense(500, activation = tf.nn.leaky_relu)
         self.fourier_dense_2 = tf.keras.layers.Dense(tf.reduce_prod(nmodes), activation = 'linear')
+
         
+                
     def call(self, inputs):
         self.dx = inputs[1]
         inp = inputs[0]
 
         #compute domain shape and extract domain info
-        # try: #stupid hack 1 to get past keras '?' tensor dimensions via try except block
-        if self.data_format == 'channels_first':
-            self.domain_info = oe.contract('ij,j->ij',tf.tile(inputs[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[2]), tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[3]), tf.keras.backend.floatx())], axis = 0), backend = 'tensorflow')
-            dx_res = self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info)))
-            X,Y = tf.meshgrid(tf.linspace(0.0,1.0,inputs[0].shape[2]), tf.linspace(0.0,1.0,inputs[0].shape[3]), indexing = 'ij')
-            X = tf.expand_dims(X, axis = 0)
-            Y = tf.expand_dims(Y, axis = 0)
-        else:
-            self.domain_info = oe.contract('ij,j->ij',tf.tile(inputs[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[1]), tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[2]), tf.keras.backend.floatx())], axis = 0), backend = 'tensorflow')
-            dx_res = self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info)))
-            X,Y = tf.meshgrid(tf.linspace(0.0,1.0,inputs[0].shape[1]), tf.linspace(0.0,1.0,inputs[0].shape[2]), indexing = 'ij')
-            X = tf.expand_dims(X, axis = 2)
-            Y = tf.expand_dims(Y, axis = 2)
-        X = tf.cast(X, tf.keras.backend.floatx())
-        Y = tf.cast(Y, tf.keras.backend.floatx())
-        # except:
-        #     if self.data_format == 'channels_first':
-        #         self.domain_info = tf.tile(inputs[1], [1,3])
-        #         dx_res = self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info)))
-        #     else:
-        #         self.domain_info = tf.tile(inputs[1], [1,3])
-        #         dx_res = self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info)))
+        try: #stupid hack 1 to get past keras '?' tensor dimensions via try except block
+            if self.data_format == 'channels_first':
+                self.domain_info = oe.contract('ij,j->ij',tf.tile(inputs[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[2]), tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[3]), tf.keras.backend.floatx())], axis = 0), backend = 'tensorflow')
+                dx_res = self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info)))
+                X,Y = tf.meshgrid(tf.linspace(0.0,1.0,inputs[0].shape[2]), tf.linspace(0.0,1.0,inputs[0].shape[3]), indexing = 'ij')
+            else:
+                self.domain_info = oe.contract('ij,j->ij',tf.tile(inputs[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[1]), tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[2]), tf.keras.backend.floatx())], axis = 0), backend = 'tensorflow')
+                dx_res = self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.domain_info)))
+                X,Y = tf.meshgrid(tf.linspace(0.0,1.0,inputs[0].shape[1]), tf.linspace(0.0,1.0,inputs[0].shape[2]), indexing = 'ij')            
+            X = tf.cast(X, tf.keras.backend.floatx())
+            Y = tf.cast(Y, tf.keras.backend.floatx())
+            sine_values = tf.Variable(tf.zeros(list(self.nmodes) + list(X.shape), dtype = tf.keras.backend.floatx()), dtype = tf.keras.backend.floatx())
+            for i in range(self.nmodes[0]):
+                for j in range(self.nmodes[1]):
+                    sine_values[i,j,...].assign(tf.sin(((i+1)*np.pi)*X) * tf.sin(((j+1)*np.pi)*Y))
+        except:
+            print('Initializing model.')
+            return inputs[0]+1
 
-        #compute Fourier series amplitudes
+        #Compute Fourier series amplitudes
         amplitudes = self.resnet_blocks[0](inputs[0])
         for layer in self.resnet_blocks:
             amplitudes = layer(amplitudes)
-        print(amplitudes.shape)
-        print(self.spp(amplitudes).shape)
         amplitudes = tf.concat([self.spp(amplitudes),dx_res], axis = 1)
         amplitudes = tf.reshape(self.fourier_dense_2(self.fourier_dense_1(self.fourier_dense_0(amplitudes))), [-1] + list(self.nmodes))
         
-        ###TODO: use the fourier coefficients to recover the solutions
-        out = tf.Variable(tf.zeros(inp.shape, dtype = tf.keras.backend.floatx()), dtype = tf.keras.backend.floatx())
-        for b in range(inp.shape[0]):
-            for i in range(self.nmodes[0]):
-                for j in range(self.nmodes[1]):
-                    out[b,...].assign(out[b,...] + amplitudes[b,i,j] * tf.sin(((i+1)*np.pi)*X) * tf.sin(((j+1)*np.pi)*Y))
-        return out
+        #Use the fourier coefficients to recover the solutions
+        out = oe.contract('bxy,xyij->bij', amplitudes, sine_values, backend = 'tensorflow')
+        if self.data_format == 'channels_first':
+            return tf.expand_dims(out, axis = 1)
+        else:
+            return tf.expand_dims(out, axis = 3)
