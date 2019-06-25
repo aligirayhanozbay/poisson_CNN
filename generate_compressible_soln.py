@@ -6,9 +6,10 @@ from collections.abc import Iterable
 from Boundary import Boundary1D
 import itertools, h5py, os, sys, time
 from multiprocessing import Pool as ThreadPool
-from generate_cholesky_soln import generate_random_RHS, poisson_RHS
+from generate_cholesky_soln import generate_random_RHS#, poisson_RHS
+from collections.abc import Iterator
 
-def poisson_matrix(rho, dx, dy = None):
+def DOESNTWORK_poisson_matrix(rho, dx, dy = None):
     '''
     Generates the matrix A to express the Poisson equation in the form Ax=b for an m-by-n grid for the compressible problem:
 
@@ -34,8 +35,7 @@ def poisson_matrix(rho, dx, dy = None):
     c4 = 2/(dy**2 * (rho[...,1:-1,1:-1] + rho[...,1:-1,:-2]))
     c0 = -c1-c2-c3-c4
     
-    ind = np.arange(0,m*(n+1), m) #indices of
-    print(ind)
+    ind = np.arange(0,m*(n+1), m)
     i,j = np.indices((m,m))
     for y in range(n):
         diagonal_block = np.zeros((rho.shape[0],m,m), dtype = np.float64)
@@ -57,7 +57,137 @@ def poisson_matrix(rho, dx, dy = None):
     return P
 
 
+def DOESNTWORK_poisson_matrix(rho, dx, dy = None):
+    
+    if not dy:
+        dy = dx
+    
+    m = rho.shape[-2] - 2 #get shape, preallocate array
+    n = rho.shape[-1] - 2
+    P = np.zeros((rho.shape[0],m*n,m*n), dtype = np.float64)
+    rhoinverse = 1/rho
+    
+    c_11 = -2.0 * (1/(dx**2) + 1/(dy**2)) * (rhoinverse[...,1:-1,1:-1])
+    c_21 = 1/(dx**2) * (rhoinverse[...,1:-1,1:-1] + (rhoinverse[...,2:,1:-1] - rhoinverse[...,:-2,1:-1])/4)
+    c_01 = 1/(dx**2) * (rhoinverse[...,1:-1,1:-1] + (-rhoinverse[...,2:,1:-1] + rhoinverse[...,:-2,1:-1])/4)
+    c_12 = 1/(dy**2) * (rhoinverse[...,1:-1,1:-1] + (rhoinverse[...,1:-1,2:] - rhoinverse[...,1:-1,:-2])/4)
+    c_10 = 1/(dy**2) * (rhoinverse[...,1:-1,1:-1] + (-rhoinverse[...,1:-1,2:] + rhoinverse[...,1:-1,:-2])/4)
+    
+    ind = np.arange(0,m*(n+1), m)
+    i,j = np.indices((m,m))
+    for y in range(n):
+        diagonal_block = np.zeros((rho.shape[0],m,m), dtype = np.float64)
+        diagonal_block[:,i==j] = c_11[:,:,y]
+        diagonal_block[:,i==j+1] = c_21[:,1:,y]
+        diagonal_block[:,i==j-1] = c_01[:,:-1,y]
+        P[:,ind[y]:ind[y+1], ind[y]:ind[y+1]] = diagonal_block
+    
+    for y in range(n-1):
+        superdiagonal_block = np.zeros((rho.shape[0],m,m), dtype = np.float64)
+        superdiagonal_block[:,i==j] = c_12[:,:,y]
+        P[:,ind[y+1]:ind[y+2], ind[y]:ind[y+1]] = superdiagonal_block
+        
+    for y in range(1,n):
+        subdiagonal_block = np.zeros((rho.shape[0],m,m), dtype = np.float64)
+        subdiagonal_block[:,i==j] = c_10[:,:,y]
+        P[:,ind[y-1]:ind[y], ind[y]:ind[y+1]] = subdiagonal_block
+        
+    return P
 
+def poisson_matrix(rho, dx, dy = None):
+    
+    if not dy:
+        dy = dx
+    
+    m = rho.shape[-2] #get shape, preallocate array
+    n = rho.shape[-1]
+    P = np.zeros((rho.shape[0],m*n,m*n), dtype = np.float64)
+    rhoinverse = 1/rho
+    
+    c_11 = -2.0 * (1/(dx**2) + 1/(dy**2)) * (rhoinverse[...,1:-1,1:-1])
+    c_21 = 1/(dx**2) * (rhoinverse[...,1:-1,1:-1] + (rhoinverse[...,2:,1:-1] - rhoinverse[...,:-2,1:-1])/4)
+    c_01 = 1/(dx**2) * (rhoinverse[...,1:-1,1:-1] + (-rhoinverse[...,2:,1:-1] + rhoinverse[...,:-2,1:-1])/4)
+    c_12 = 1/(dy**2) * (rhoinverse[...,1:-1,1:-1] + (rhoinverse[...,1:-1,2:] - rhoinverse[...,1:-1,:-2])/4)
+    c_10 = 1/(dy**2) * (rhoinverse[...,1:-1,1:-1] + (-rhoinverse[...,1:-1,2:] + rhoinverse[...,1:-1,:-2])/4)
+    
+    ind = np.arange(0,m*(n+1), m)
+    i,j = np.indices((m,m))
+    P[:,ind[0]:ind[1],ind[0]:ind[1]][:,i==j] = 1.0
+    P[:,ind[-2]:ind[-1],ind[-2]:ind[-1]][:,i==j] = 1.0
+    for y in range(1,n-1):
+        diagonal_block = np.zeros((rho.shape[0],m,m), dtype = np.float64)
+        diagonal_block[:,i==j] = tf.pad(c_11[:,:,y-1], tf.constant([[0,0],[1,1]]))
+        diagonal_block[:,i==j+1] = tf.pad(c_21[:,:,y-1], tf.constant([[0,0],[0,1]]))
+        diagonal_block[:,i==j-1] = tf.pad(c_01[:,:,y-1], tf.constant([[0,0],[1,0]]))
+        diagonal_block[:,0,0] = 1.0
+        diagonal_block[:,-1,-1] = 1.0
+        P[:,ind[y]:ind[y+1], ind[y]:ind[y+1]] = diagonal_block
+    
+    for y in range(1,n-2):
+        superdiagonal_block = np.zeros((rho.shape[0],m,m), dtype = np.float64)
+        superdiagonal_block[:,i==j] = tf.pad(c_12[:,:,y-1], tf.constant([[0,0],[1,1]]))
+        P[:,ind[y+1]:ind[y+2], ind[y]:ind[y+1]] = superdiagonal_block
+        
+    for y in range(2,n-1):
+        subdiagonal_block = np.zeros((rho.shape[0],m,m), dtype = np.float64)
+        subdiagonal_block[:,i==j] = tf.pad(c_10[:,:,y-1], tf.constant([[0,0],[1,1]]))
+        P[:,ind[y-1]:ind[y], ind[y]:ind[y+1]] = subdiagonal_block
+        
+    return P
+
+     
+def poisson_RHS(F, boundaries = None, h = None, rho = None):
+    boundaries = copy.deepcopy(boundaries)
+    
+    rhs = np.zeros(F.shape)#np.zeros(list(F.shape[:-2]) + [np.prod(F.shape[-2:])])
+      
+    for key in boundaries.keys():
+        if len(boundaries[key].shape) > 1:
+            boundaries[key] = tf.squeeze(boundaries[key])
+        if len(boundaries[key].shape) == 1:
+            boundaries[key] = itertools.repeat(boundaries[key], F.shape[0])
+    
+    if (h is not None) and isinstance(h, float):
+        h = itertools.repeat(h, F.shape[0])
+      
+    for i in range(F.shape[0]):
+        if h is not None:
+            try:
+                dx = next(h)
+            except:
+                dx = h[i]
+            F[i] = -dx**2 * F[i]
+      
+        if isinstance(boundaries['top'], Iterator):
+            top = next(boundaries['top'])
+        else:
+            top = boundaries['top'][i]
+            
+        if isinstance(boundaries['bottom'], Iterator):
+            bottom = next(boundaries['bottom'])
+        else:
+            bottom = boundaries['bottom'][i]
+            
+        if isinstance(boundaries['left'], Iterator):
+            left = next(boundaries['left'])
+        else:
+            left = boundaries['left'][i]
+            
+        if isinstance(boundaries['right'], Iterator):
+            right = next(boundaries['right'])
+        else:
+            right = boundaries['right'][i]
+        
+      
+        rhs[i,...,0] = top
+        rhs[i,...,-1] = bottom
+        rhs[i,...,0,:] = left
+        rhs[i,...,-1,:] = right
+        rhs[i,...,1:-1,1:-1] = F[i,...,1:-1,1:-1]
+      
+    return rhs.reshape(list(rhs.shape[:-2]) + [np.prod(rhs.shape[-2:])])
+      
+      
 def compressible_poisson_solve(rho, rhses, boundaries, dx, dy = None, system_matrix = None):
     '''
     Solves the Poisson equation for the given RHSes.
@@ -87,35 +217,23 @@ def compressible_poisson_solve(rho, rhses, boundaries, dx, dy = None, system_mat
     if system_matrix == None:
         system_matrix = tf.cast(poisson_matrix(rho, dx, dy = dy), tf.keras.backend.floatx())
 
-    # def solve(r):
-    #     return tf.linalg.solve(tf.expand_dims(r[0]), tf.expand_dims(r[1], axis = 0))
-    
-    # try:
-    #     @tf.contrib.eager.defun
-    #     def solve_parallel_wrapper(rhs_arr):
-    #         return tf.map_fn(solve, [system_matrix, rhs_arr], parallel_iterations = 10)
-    # except:
-    #     @tf.function
-    #     def solve_parallel_wrapper(rhs_arr):
-    #         return tf.map_fn(solve, [system_matrix, rhs_arr], parallel_iterations = 10, dtype = tf.keras.backend.floatx())
-
     #put problem into Ax=b format
     try:
         rhs_vectors = tf.expand_dims(tf.transpose(tf.squeeze(poisson_RHS(np.array(rhses), boundaries = boundaries, rho = rho)), (0,1)),axis=2)
     except:
         rhs_vectors = tf.expand_dims(tf.expand_dims(tf.squeeze(poisson_RHS(np.array(rhses), boundaries = boundaries, rho = rho)),axis=1), axis=0)
 
-    z = tf.reshape(tf.linalg.solve(system_matrix, rhs_vectors), list(rhses.shape[:-2]) + [int(rhses.shape[-1])-2, int(rhses.shape[-2])-2])
+    z = tf.reshape(tf.linalg.solve(system_matrix, rhs_vectors), list(rhses.shape[:-2]) + [int(rhses.shape[-1]), int(rhses.shape[-2])])
     z = tf.transpose(z, list(range(len(z.shape[:-2]))) + [len(z.shape)-1, len(z.shape)-2])
 
-    soln = np.zeros(rhses.shape, dtype = np.float64)
-    soln[...,:,0] = boundaries['top']
-    soln[...,:,-1] = boundaries['bottom']
-    soln[...,0,:] = boundaries['left']
-    soln[...,-1,:] = boundaries['right']
-    soln[...,1:-1,1:-1] = z
+#     soln = np.zeros(rhses.shape, dtype = np.float64)
+#     soln[...,:,0] = boundaries['top']
+#     soln[...,:,-1] = boundaries['bottom']
+#     soln[...,0,:] = boundaries['left']
+#     soln[...,-1,:] = boundaries['right']
+#     soln[...,1:-1,1:-1] = z
 
-    return tf.expand_dims(soln, axis = 1)
+    return tf.expand_dims(z, axis = 1)
 
 def generate_dataset(batch_size, n, boundaries, dx, dy = None, smoothness_levels = 1, max_random_magnitude = 1.0 - (1e-7), initial_smoothness = 5):
     smoothnesses = np.arange(initial_smoothness, initial_smoothness + smoothness_levels)

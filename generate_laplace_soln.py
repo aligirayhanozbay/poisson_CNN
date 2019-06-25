@@ -50,5 +50,5 @@ def generate_laplace_soln(batch_size = 1, nx = None, ny = None, dx = None, smoot
         dx = 0.1*(np.random.rand() + 0.01)
     
     boundaries = generate_random_boundaries(nx, ny, batch_size = batch_size, smoothness = smoothness, nonzero_boundaries = nonzero_boundaries, max_random_magnitude = max_random_magnitude, return_with_expanded_dims = True)
-    print(boundaries['left'].shape)
+    #print(boundaries['left'].shape)
     return boundaries, cholesky_poisson_solve(rhses = tf.zeros((batch_size,1,nx,ny), dtype = tf.keras.backend.floatx()), boundaries = boundaries, h = dx), dx

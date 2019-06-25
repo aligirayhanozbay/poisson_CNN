@@ -261,8 +261,8 @@ class ResampledConvolutionBlock(tf.keras.models.Model):
             self.pre_upsample_conv_blocks = [ResnetBlock(data_format = data_format, **convblockargs) for i in range(pre_upsample_conv_blocks)]
             self.post_upsample_conv_blocks = [ResnetBlock(data_format = data_format, **convblockargs) for i in range(post_upsample_conv_blocks)]
         else:
-            self.pre_upsample_conv_blocks = [tf.keras.layers.Conv2D(data_format = data_format, **convblockargs) for i in range(pre_upsample_conv_blocks)]
-            self.post_upsample_conv_blocks = [tf.keras.layers.Conv2D(data_format = data_format, **convblockargs) for i in range(post_upsample_conv_blocks)]
+            self.pre_upsample_conv_blocks = [tf.keras.layers.Conv2D(data_format = data_format, padding = 'same', **convblockargs) for i in range(pre_upsample_conv_blocks)]
+            self.post_upsample_conv_blocks = [tf.keras.layers.Conv2D(data_format = data_format, padding = 'same', **convblockargs) for i in range(post_upsample_conv_blocks)]
         
     def call(self, inp):
         if self.data_format == 'channels_first':

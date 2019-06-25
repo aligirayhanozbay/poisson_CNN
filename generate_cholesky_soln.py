@@ -149,10 +149,10 @@ def poisson_RHS(F, boundaries = None, h = None, rho = None):
             right = boundaries['right'][i,1:-1]
             
         if rho is not None:
-            top *= rho[i,...,1:-1,1]
-            bottom *= rho[i,...,1:-1,-2]
-            left *= rho[i,...,1,1:-1]
-            right *= rho[i,...,-2,1:-1]
+            top = top/rho[i,...,1:-1,1]
+            bottom = bottom/rho[i,...,1:-1,-2]
+            left = left/rho[i,...,1,1:-1]
+            right = right/rho[i,...,-2,1:-1]
         
         F[i,...,1:-1,1] += top
         F[i,...,1:-1,-2] += bottom
