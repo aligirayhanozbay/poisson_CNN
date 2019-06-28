@@ -109,9 +109,11 @@ class Homogeneous_Poisson_NN_3(Model_With_Integral_Loss_ABC): #variant to includ
         
         self.fourier_dense_0 = tf.keras.layers.Dense(250, activation = tf.nn.leaky_relu)
         self.fourier_dense_1 = tf.keras.layers.Dense(500, activation = tf.nn.leaky_relu)
-        self.fourier_dense_2 = tf.keras.layers.Dense(tf.reduce_prod(nmodes), activation = 'linear')
+        self.fourier_dense_2 = tf.keras.layers.Dense(tf.reduce_prod(nmodes), activation = lambda x: 4*tf.nn.tanh(x)/np.pi**2)
 
-        
+        m,n = tf.meshgrid(np.arange(self.nmodes[0])+1,np.arange(self.nmodes[1])+1)
+        self.m = tf.expand_dims((tf.cast(m, tf.keras.backend.floatx())**2) * (tf.cast(np.pi, tf.keras.backend.floatx())**2), axis = 0)
+        self.n = tf.expand_dims((tf.cast(n, tf.keras.backend.floatx())**2) * (tf.cast(np.pi, tf.keras.backend.floatx())**2), axis = 0)
                 
     def call(self, inputs):
         self.dx = inputs[1]
@@ -142,8 +144,12 @@ class Homogeneous_Poisson_NN_3(Model_With_Integral_Loss_ABC): #variant to includ
         for layer in self.resnet_blocks:
             amplitudes = layer(amplitudes)
         amplitudes = tf.concat([self.spp(amplitudes),dx_res], axis = 1)
-        amplitudes = tf.reshape(self.fourier_dense_2(self.fourier_dense_1(self.fourier_dense_0(amplitudes))), [-1] + list(self.nmodes))
+        amplitudes = oe.contract('ijk,i->ijk',tf.reshape(self.fourier_dense_2(self.fourier_dense_1(self.fourier_dense_0(amplitudes))), [-1] + list(self.nmodes)), tf.reduce_prod(self.domain_info[:,1:], axis = 1), backend = 'tensorflow')
         
+        LxoverLy = self.domain_info[:,1]/self.domain_info[:,2]
+        m = oe.contract('ijk,i->ijk', tf.tile(self.m, [inputs[0].shape[0],1,1]), 1/LxoverLy, backend = 'tensorflow')
+        n = oe.contract('ijk,i->ijk', tf.tile(self.n, [inputs[0].shape[0],1,1]), LxoverLy, backend = 'tensorflow')
+        amplitudes = amplitudes*(-4.0)/(m+n)
         #Use the fourier coefficients to recover the solutions
         out = oe.contract('bxy,xyij->bij', amplitudes, sine_values, backend = 'tensorflow')
         if self.data_format == 'channels_first':
