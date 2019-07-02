@@ -134,62 +134,12 @@ def poisson_matrix(rho, dx, dy = None):
         P[:,ind[y-1]:ind[y], ind[y]:ind[y+1]] = subdiagonal_block
         
     return P
-
-     
-def poisson_RHS(F, boundaries = None, h = None, rho = None):
-    boundaries = copy.deepcopy(boundaries)
-    
-    rhs = np.zeros(F.shape)#np.zeros(list(F.shape[:-2]) + [np.prod(F.shape[-2:])])
-      
-    for key in boundaries.keys():
-        if len(boundaries[key].shape) > 1:
-            boundaries[key] = tf.squeeze(boundaries[key])
-        if len(boundaries[key].shape) == 1:
-            boundaries[key] = itertools.repeat(boundaries[key], F.shape[0])
-    
-    if (h is not None) and isinstance(h, float):
-        h = itertools.repeat(h, F.shape[0])
-      
-    for i in range(F.shape[0]):
-        if h is not None:
-            try:
-                dx = next(h)
-            except:
-                dx = h[i]
-            F[i] = -dx**2 * F[i]
-      
-        if isinstance(boundaries['top'], Iterator):
-            top = next(boundaries['top'])
-        else:
-            top = boundaries['top'][i]
-            
-        if isinstance(boundaries['bottom'], Iterator):
-            bottom = next(boundaries['bottom'])
-        else:
-            bottom = boundaries['bottom'][i]
-            
-        if isinstance(boundaries['left'], Iterator):
-            left = next(boundaries['left'])
-        else:
-            left = boundaries['left'][i]
-            
-        if isinstance(boundaries['right'], Iterator):
-            right = next(boundaries['right'])
-        else:
-            right = boundaries['right'][i]
-        
-      
-        rhs[i,...,0] = top
-        rhs[i,...,-1] = bottom
-        rhs[i,...,0,:] = left
-        rhs[i,...,-1,:] = right
-        rhs[i,...,1:-1,1:-1] = F[i,...,1:-1,1:-1]
-      
-    return rhs.reshape(list(rhs.shape[:-2]) + [np.prod(rhs.shape[-2:])])
-      
       
 def compressible_poisson_solve(rho, rhses, boundaries, dx, dy = None, system_matrix = None):
     '''
+    REWRITE THIS FUNCTION ENTIRELY TO MODIFY LHS MATRIX ONLY AND THEN CALL SOLVER FUNCTION INSTEAD!!!
+    
+    
     Solves the Poisson equation for the given RHSes.
     
     rhses: tf.Tensor representing the RHS functions of the Poisson equation, defined across the last 2 dimensions
