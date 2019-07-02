@@ -50,12 +50,12 @@ def set_max_magnitude_in_batch(arr, max_random_magnitude):
 def generate_random_RHS(batch_size, n_controlpts, n_outputpts, resize_method = tf.image.ResizeMethod.BICUBIC, max_random_magnitude = np.inf):
     
     '''
-    This function generates random smooth RHS 'functions' defined pointwise by creating a random number field defined in n_controlpts and then super-sampling it using tf.image.resize_images. Results are stacked across the 1st dimension.
+    This function generates random smooth RHS 'functions' defined pointwise by creating a random number field the shape of which is defined by n_controlpts and then super-sampling it using tf.image.resize_images. Results are stacked across the 1st dimension.
     
     batch_size: no. of random RHSes to generate
     n_controlpts: Iterable or int. No. of control pts of the spline along each dimension. Smaller values lead to 'smoother' results.
     n_outputpts: Iterable or int. No. of gridpoints in each direction of the output 
-    supersample_method: Supersampling method for tf.image.resize_images. Use bicubic for smooth RHSes - bilinear or nearest neighbor NOT recommended
+    resize_method Supersampling method for tf.image.resize_images. Use bicubic for smooth RHSes - bilinear or nearest neighbor NOT recommended
     max_random_magnitude: If the maximum absolute value of a generated random RHS exceeds this value, the entire thing is rescaled so the max abs. val. becomes this value
     '''
     
@@ -64,22 +64,26 @@ def generate_random_RHS(batch_size, n_controlpts, n_outputpts, resize_method = t
     except:
         n_controlpts = tf.ones(len(n_outputpts), dtype = tf.int32)*n_controlpts
     rhs = 2*tf.random.uniform([batch_size, 1] + list(n_controlpts), dtype = tf.keras.backend.floatx())-1
-    print('small grid generated')
     rhs = image_resize(rhs, n_outputpts, resize_method = resize_method)
-    print('resized')
     rhs = rhs
-    print('RHS generated')
     if max_random_magnitude != np.inf:
         rhs = set_max_magnitude_in_batch(rhs, max_random_magnitude)
-        print('Max magnitudes set')
-    # if max_random_magnitude != np.inf:
-    #     for i in range(int(rhs.shape[0])):
-    #         scaling_factor = max_random_magnitude/tf.reduce_max(tf.abs(rhs[i,...]))
-    #         rhs[i,...].assign(rhs[i,...] * scaling_factor)
 
     return rhs
 
 def generate_random_boundaries(n_outputpts, batch_size = 1, max_random_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, smoothness = None, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], return_with_expanded_dims = False, data_format = 'channels_first'):
+    '''
+    This function generates random smooth BC 'functions' defined pointwise by creating a random number field the size of which is determined by 'smoothness' and then super-sampling it using tf.image.resize_images. Results are stacked across the 1st dimension.
+    
+    batch_size: no. of random RHSes to generate
+    n_outputpts: Iterable or int. No. of gridpoints in each direction of the output 
+    resize_method: Supersampling method for tf.image.resize_images. Use bicubic for smooth boundaries - bilinear or nearest neighbor NOT recommended
+    max_random_magnitude: Dict with entries 'left', 'right', 'top', 'bottom'. If the maximum absolute value of a generated random BC exceeds this value, it's rescaled so the max abs. val. becomes this value.
+    nonzero_boundaries: Boundaries not included in this list will be all 0s. Entries same as max_random_magnitude.
+    return_with_expanded_dims: If set to true, the returned arrays will have shape (batch_size,1,n) instead of (batch_size,n)
+    data_format: If set to 'channels_first', the expanded dim will be the 2nd dimension. Else, it'll be the 3rd.
+    '''
+    
     boundary_lengths = {'left' : n_outputpts[1], 'right' : n_outputpts[1], 'top' : n_outputpts[0], 'bottom' : n_outputpts[0]}
     if isinstance(smoothness, int):
         smoothness = {'left' : smoothness, 'right' : smoothness, 'top' : smoothness, 'bottom' : smoothness}
@@ -111,14 +115,21 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_random_magnitude
 def generate_dataset(batch_size, output_shape, dx = 'random', boundaries = 'random', rhses = 'random', smoothness = 1, rhs_max_random_magnitude = 1.0, boundary_max_random_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False):
     '''
     Generates Poisson equation RHS-solution pairs with 'random' RHS functions.
-    
+
+    batch_size: No of problem-soln pairs to generate
     output_shape: shape of the outputs
-    h: grid spacing of the outputs
-    boundaries: boundary conditions of the outputs; see poisson_RHS documentation
-    initial_smoothness and smoothness_levels: See documentation for __main__
-    batch_size: No of random pairs to generate per smoothness level
-    max_random_magnitude: See documentation for generate_random_RHS
-    
+    dx: Grid spacing. Can be 'random' for random grid spacings, a floating point value or an array of size (batch_size).
+    boundaries: Supply the boundaries as a dict containing the entries 'top', 'bottom', 'right' and 'left' or set as 'random' for random BCs.
+    rhses: Supply the RHSes as a tensor of shape (batch_size, 1, nx, ny) or set as 'random'
+    smoothness: Int. Determines the resolution of the coarse grid.
+    rhs_max_random_magnitude: Float. Max magnitude for generated rhses
+    boundary_max_random_magnitude: Dict containing the entries 'top', 'bottom', 'right' and 'left'. Sets max magnitude for the corresponding boundaries.
+    nonzero_boundaries: See generate_random_boundaries
+    solver_method: 'multigrid' for PyAMG multigrid solver, 'cholesky' for Cholesky decomposition solver (on GPU) or supply a callable taking arguments (rhses, boundaries, dx)
+    return_rhs: If set to True, the RHSes will be appended to the output
+    return_boundaries: If set to True, the BCs will be appended to the output
+    return_dx: If set to True, the grid spacing(s) will be appended to the output
+
     Outputs a tf.Tensor of shape (batch_size * smoothness_levels, n[0], n[1])
     '''
     if rhses == 'random':
@@ -134,6 +145,8 @@ def generate_dataset(batch_size, output_shape, dx = 'random', boundaries = 'rand
 
     if dx == 'random':
         dx = (0.1+np.random.rand(batch_size))*0.1
+    elif isinstance(dx, float):
+        dx = np.ones((batch_size))*dx
 
     if not callable(solver_method):
         if solver_method == 'cholesky':
