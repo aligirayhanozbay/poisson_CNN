@@ -89,5 +89,5 @@ def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = No
         solns[k,...] = solver.solve(np.squeeze(rhs_vectors[k,...]), tol = tol)
         
 
-    return np.expand_dims(np.reshape(solns, rhses.shape, order = 'f'), axis = 1)
+    return np.expand_dims(np.reshape(solns, rhses.shape, order = 'c'), axis = 1)
     

@@ -105,7 +105,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
     boundaries = {}
     for boundary in smoothness.keys():
         if boundary in nonzero_boundaries:
-            boundaries[boundary] = tf.Variable(image_resize(2*tf.random.uniform((batch_size,smoothness[boundary]), dtype = tf.keras.backend.floatx())-1, [batch_size, boundary_lengths[boundary]]))
+            boundaries[boundary] = image_resize(2*tf.random.uniform((batch_size,smoothness[boundary]), dtype = tf.keras.backend.floatx())-1, [batch_size, boundary_lengths[boundary]])
 
             if max_magnitude[boundary] != np.inf:
                 boundaries[boundary] = set_max_magnitude_in_batch(boundaries[boundary], max_magnitude[boundary])
@@ -119,7 +119,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
                 boundaries[boundary] = tf.expand_dims(boundaries[boundary], axis = 2)
     return boundaries
 
-def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, random_output_shape_range = [[64,85],[64,85]]):
+def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]]):
     '''
     Generates Poisson equation RHS-solution pairs with 'random' RHS functions.
 
@@ -154,7 +154,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
         boundaries = generate_random_boundaries(output_shape, batch_size = batch_size, return_with_expanded_dims = True, nonzero_boundaries = [])
 
     if dx == 'random':
-        dx = (0.1+np.random.rand(batch_size))*0.1
+        dx = (0.1+tf.random.uniform((batch_size,1)))*0.1
     elif isinstance(dx, float):
         dx = np.ones((batch_size))*dx
     
@@ -165,7 +165,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
             solver_method = multigrid_poisson_solve
         else:
             raise(ValueError('solver_method must be a function or one of cholesky or multigrid'))
-        
+
     out = solver_method(rhses, boundaries,dx)
     inp = []
     if return_rhs:
@@ -173,14 +173,16 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     if return_boundaries:
         inp.append(boundaries)
     if return_dx:
-        inp.append(dx)
+        inp.append(tf.cast(dx, tf.keras.backend.floatx()))
+    if return_shape:
+        inp.append(tf.cast(tf.constant(rhses.shape), tf.int32))
     
     if len(inp) > 0:
-        return inp, out
+        return inp, tf.constant(out)
     else:
-        return out
+        return tf.constant(out)
 
-def numerical_dataset_generator(randomize_rhs_smoothness = False, rhs_random_smoothness_range = [5,20], randomize_boundary_smoothness = False, boundary_random_smoothness_range = {'left':[5,20], 'top':[5,20], 'right':[5,20], 'bottom': [5,20]}, randomize_rhs_max_magnitude = False, rhs_random_max_magnitude = 1.0, randomize_boundary_max_magnitudes = False, boundary_random_max_magnitudes = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, return_keras_style = False, **numerical_dataset_arguments):
+def numerical_dataset_generator(randomize_rhs_smoothness = False, rhs_random_smoothness_range = [5,20], randomize_boundary_smoothness = False, boundary_random_smoothness_range = {'left':[5,20], 'top':[5,20], 'right':[5,20], 'bottom': [5,20]}, randomize_rhs_max_magnitude = False, rhs_random_max_magnitude = 1.0, randomize_boundary_max_magnitudes = False, boundary_random_max_magnitudes = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, return_keras_style = False, exclude_zero_boundaries = False, **numerical_dataset_arguments):
     '''
     Creates a generator that can be used to generate infinitely many sets of Poissin eq. RHSes-BCs-solutions
     
@@ -194,6 +196,7 @@ def numerical_dataset_generator(randomize_rhs_smoothness = False, rhs_random_smo
     boundary_random_max_magnitude: Dict containing entries 'left', 'top', 'right', 'bottom'. Each entry must be the same format as rhs_random_max_magnitude.
     numerical_dataset_arguments: Arguments to pass onto the function numerical_dataset.
     return_keras_style: If set to True, the values from the boundaries dict will be unpacked (in the order left-top-right-bottom) into members of the output list.
+    exclude_zero_boundaries: If set to True, nonzero boundaries are not returned if return_keras_style is True.
     '''
     while True:
         if randomize_rhs_smoothness:
@@ -207,10 +210,14 @@ def numerical_dataset_generator(randomize_rhs_smoothness = False, rhs_random_smo
         inp, out = numerical_dataset(**numerical_dataset_arguments)
         if return_keras_style:
             if ('return_boundaries' in numerical_dataset_arguments.keys()):
-                if ('return_rhs' in numerical_dataset_arguments.keys()):
+                if ('return_rhs' in numerical_dataset_arguments.keys()) and numerical_dataset_arguments['return_rhs']:
                     boundary_location = 1
                 else:
                     boundary_location = 0
-                boundary_list = [inp[boundary_location]['left'], inp[boundary_location]['top'], inp[boundary_location]['right'], inp[boundary_location]['bottom']]
+                if (not exclude_zero_boundaries) or ('nonzero_boundaries' not in numerical_dataset_arguments.keys()):
+                    boundary_list = [inp[boundary_location]['left'], inp[boundary_location]['top'], inp[boundary_location]['right'], inp[boundary_location]['bottom']]
+                else:
+                    boundary_list = [inp[boundary_location][key] for key in numerical_dataset_arguments['nonzero_boundaries']]
+                _ = inp.pop(boundary_location)
                 inp[boundary_location:boundary_location] = boundary_list
         yield inp, out

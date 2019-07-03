@@ -174,10 +174,15 @@ class Dirichlet_BC_NN_2D(Model_With_Integral_Loss_ABC):
         self.dx = inputs[1]
         out = self.conv1d_2(self.conv1d_1(self.conv1d_0(inputs[0])))
         try:
-            self.x_output_resolution = inputs[2]
+            if inputs[2].shape[0] == 1:
+                self.x_output_resolution = int(inputs[2])
+            elif self.data_format == 'channels_first':
+                self.x_output_resolution = int(inputs[2][2])
+            else:
+                self.x_output_resolution = int(inputs[2][1])
         except:
-            pass
-        
+           pass
+
         try: #stupid hack 1 to get past keras '?' tensor dimensions via try except block
             if self.data_format == 'channels_first':
                 self.domain_info = oe.contract('ij,j->ij',tf.tile(inputs[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(self.x_output_resolution, tf.keras.backend.floatx()), tf.cast(tf.constant(inputs[0].shape[2]), tf.keras.backend.floatx())], axis = 0), backend = 'tensorflow')
