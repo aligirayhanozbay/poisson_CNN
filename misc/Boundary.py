@@ -141,11 +141,3 @@ class Boundary1D:
                 error_derivatives = 0.0
             return error_function + self.derivative_regularizer_coefficient * error_derivatives
                 
-            
-        
-#class test_model: #for testing - set return func. on predict_on_batch method to the same as rhs function at the boundary to check if you get 0
-#    def __init__(self):
-#        pass
-#    def predict_on_batch(self, arg):
-#        return tf.sin(np.pi*(arg[...,0]+1))    
-        
