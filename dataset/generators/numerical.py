@@ -119,7 +119,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
                 boundaries[boundary] = tf.expand_dims(boundaries[boundary], axis = 2)
     return boundaries
 
-def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]]):
+def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]], random_dx_range = [0.005,0.05]):
     '''
     Generates Poisson equation RHS-solution pairs with 'random' RHS functions.
 
@@ -154,7 +154,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
         boundaries = generate_random_boundaries(output_shape, batch_size = batch_size, return_with_expanded_dims = True, nonzero_boundaries = [])
 
     if dx == 'random':
-        dx = (0.1+tf.random.uniform((batch_size,1)))*0.1
+        dx = tf.random.uniform((batch_size,1))*(random_dx_range[1] - random_dx_range[0]) + random_dx_range[0]
     elif isinstance(dx, float):
         dx = np.ones((batch_size))*dx
     
