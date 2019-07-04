@@ -2,8 +2,10 @@ import tensorflow as tf
 import itertools
 import numpy as np
 import multiprocessing
-from ..solvers import *
 from collections.abc import Iterable
+
+from ..solvers import *
+
 
 @tf.function
 def image_resize(image, newshape, data_format = 'channels_first', resize_method = tf.image.ResizeMethod.BICUBIC):
@@ -182,42 +184,68 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     else:
         return tf.constant(out)
 
-def numerical_dataset_generator(randomize_rhs_smoothness = False, rhs_random_smoothness_range = [5,20], randomize_boundary_smoothness = False, boundary_random_smoothness_range = {'left':[5,20], 'top':[5,20], 'right':[5,20], 'bottom': [5,20]}, randomize_rhs_max_magnitude = False, rhs_random_max_magnitude = 1.0, randomize_boundary_max_magnitudes = False, boundary_random_max_magnitudes = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, return_keras_style = False, exclude_zero_boundaries = False, **numerical_dataset_arguments):
-    '''
-    Creates a generator that can be used to generate infinitely many sets of Poissin eq. RHSes-BCs-solutions
-    
-    randomize_rhs_smoothness: Boolean. Set to True if it's desired to have random RHS smoothnesses.
-    rhs_random_smoothness_range: List of 2 integers. First integer is the lower bound and 2nd integer is the upper bound of the random RHS smoothnesses. Ignored if randomize_rhs_smoothness is False.
-    randomize_boundary_smoothness: Boolean. Set to True if it's desired to have random BC smoothnesses.
-    boundary_random_smoothness_range: Dict containing entries 'left', 'top', 'right', 'bottom'. Each entry must be the same format as rhs_random_smoothness_range
-    randomize_rhs_max_magnitude: Boolean. Set to True if it's desired to have random RHS magnitudes.
-    rhs_random_max_magnitude: Float. Max value of the random max magnitude.
-    randomize_boundary_max_magnitude: Boolean. Set to True if it's desired to have random BC magnitudes.
-    boundary_random_max_magnitude: Dict containing entries 'left', 'top', 'right', 'bottom'. Each entry must be the same format as rhs_random_max_magnitude.
-    numerical_dataset_arguments: Arguments to pass onto the function numerical_dataset.
-    return_keras_style: If set to True, the values from the boundaries dict will be unpacked (in the order left-top-right-bottom) into members of the output list.
-    exclude_zero_boundaries: If set to True, nonzero boundaries are not returned if return_keras_style is True.
-    '''
-    while True:
-        if randomize_rhs_smoothness:
-            numerical_dataset_arguments['rhs_smoothness'] = np.random.randint(random_smoothness_range[0], high = random_smoothness_range[0])
-        if randomize_boundary_smoothness:
-            numerical_dataset_arguments['boundary_smoothness'] = dict(zip(list(boundary_random_smoothness_range.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(boundary_random_smoothness_range.values())]))
-        if randomize_rhs_max_magnitude:
-            numerical_dataset_arguments['rhs_max_magnitude'] = np.random.rand() * rhs_random_max_magnitude
-        if randomize_boundary_max_magnitudes:
-            numerical_dataset_arguments['boundary_max_magnitude'] = dict(zip(list(boundary_random_max_magnitudes.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(boundary_random_max_magnitudes.values())]))
-        inp, out = numerical_dataset(**numerical_dataset_arguments)
-        if return_keras_style:
-            if ('return_boundaries' in numerical_dataset_arguments.keys()):
-                if ('return_rhs' in numerical_dataset_arguments.keys()) and numerical_dataset_arguments['return_rhs']:
+class numerical_dataset_generator(tf.keras.utils.Sequence):
+    def __init__(self, batch_size = 1, batches_per_epoch = 1, randomize_rhs_smoothness = False, rhs_random_smoothness_range = [5,20], randomize_boundary_smoothness = False, boundary_random_smoothness_range = {'left':[5,20], 'top':[5,20], 'right':[5,20], 'bottom': [5,20]}, randomize_rhs_max_magnitude = False, rhs_random_max_magnitude = 1.0, randomize_boundary_max_magnitudes = False, boundary_random_max_magnitudes = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, return_keras_style = True, exclude_zero_boundaries = False, **numerical_dataset_arguments):
+        '''
+        Creates a generator that can be used to generate infinitely many sets of Poisson eq. RHSes-BCs-solutions
+        
+        batch_size: Int. Batch size of outputs.
+        batches_per_epoch: Int. No of batches to create in each training epoch.
+        randomize_rhs_smoothness: Boolean. Set to True if it's desired to have random RHS smoothnesses.
+        rhs_random_smoothness_range: List of 2 integers. First integer is the lower bound and 2nd integer is the upper bound of the random RHS smoothnesses. Ignored if randomize_rhs_smoothness is False.
+        randomize_boundary_smoothness: Boolean. Set to True if it's desired to have random BC smoothnesses.
+        boundary_random_smoothness_range: Dict containing entries 'left', 'top', 'right', 'bottom'. Each entry must be the same format as rhs_random_smoothness_range
+        randomize_rhs_max_magnitude: Boolean. Set to True if it's desired to have random RHS magnitudes.
+        rhs_random_max_magnitude: Float. Max value of the random max magnitude.
+        randomize_boundary_max_magnitude: Boolean. Set to True if it's desired to have random BC magnitudes.
+        boundary_random_max_magnitude: Dict containing entries 'left', 'top', 'right', 'bottom'. Each entry must be the same format as rhs_random_max_magnitude.
+        numerical_dataset_arguments: Arguments to pass onto the function numerical_dataset.
+        return_keras_style: If set to True, the values from the boundaries dict will be unpacked (in the order left-top-right-bottom) into members of the output list.
+        exclude_zero_boundaries: If set to True, nonzero boundaries are not returned if return_keras_style is True.
+        '''
+
+        self.randomize_rhs_smoothness = randomize_rhs_smoothness
+        if self.randomize_rhs_smoothness:
+            self.rhs_random_smoothness_range = rhs_random_smoothness_range
+        self.randomize_boundary_smoothness = randomize_boundary_smoothness
+        if self.randomize_boundary_smoothness:
+            self.boundary_random_smoothness_range = boundary_random_smoothness_range
+        self.randomize_rhs_max_magnitude = randomize_rhs_max_magnitude
+        if self.randomize_rhs_max_magnitude:
+            self.rhs_random_max_magnitude = rhs_random_max_magnitude
+        self.randomize_boundary_max_magnitudes = randomize_boundary_max_magnitudes
+        if self.randomize_boundary_max_magnitudes:
+            self.boundary_random_max_magnitudes = boundary_random_max_magnitudes
+
+        self.exclude_zero_boundaries = exclude_zero_boundaries
+        self.batch_size = batch_size
+        self.batches_per_epoch = batches_per_epoch
+        self.nda = numerical_dataset_arguments
+        self.return_keras_style = return_keras_style
+
+    def __len__(self):
+        return self.batches_per_epoch
+
+    def __getitem__(self, idx): #Generates a batch. Input idx is ignored but is necessary per Keras API.
+        if self.randomize_rhs_smoothness:
+            self.nda['rhs_smoothness'] = np.random.randint(random_smoothness_range[0], high = random_smoothness_range[0])
+        if self.randomize_boundary_smoothness:
+            self.nda['boundary_smoothness'] = dict(zip(list(boundary_random_smoothness_range.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(boundary_random_smoothness_range.values())]))
+        if self.randomize_rhs_max_magnitude:
+            self.nda['rhs_max_magnitude'] = np.random.rand() * rhs_random_max_magnitude
+        if self.randomize_boundary_max_magnitudes:
+            self.nda['boundary_max_magnitude'] = dict(zip(list(boundary_random_max_magnitudes.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(boundary_random_max_magnitudes.values())]))
+        inp, out = numerical_dataset(**self.nda)
+        if self.return_keras_style:
+            if ('return_boundaries' in self.nda.keys()):
+                if ('return_rhs' in self.nda.keys()) and self.nda['return_rhs']:
                     boundary_location = 1
                 else:
                     boundary_location = 0
-                if (not exclude_zero_boundaries) or ('nonzero_boundaries' not in numerical_dataset_arguments.keys()):
+                if (not self.exclude_zero_boundaries) or ('nonzero_boundaries' not in self.nda.keys()):
                     boundary_list = [inp[boundary_location]['left'], inp[boundary_location]['top'], inp[boundary_location]['right'], inp[boundary_location]['bottom']]
                 else:
-                    boundary_list = [inp[boundary_location][key] for key in numerical_dataset_arguments['nonzero_boundaries']]
+                    boundary_list = [inp[boundary_location][key] for key in self.nda['nonzero_boundaries']]
                 _ = inp.pop(boundary_location)
                 inp[boundary_location:boundary_location] = boundary_list
-        yield inp, out
+        return inp, out
