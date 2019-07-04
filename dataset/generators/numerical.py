@@ -142,6 +142,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
 
     Outputs a tf.Tensor of shape (batch_size * smoothness_levels, n[0], n[1])
     '''
+
     if output_shape == 'random':
         output_shape = [np.random.randint(random_output_shape_range[k][0], high = random_output_shape_range[k][1]) for k in range(len(random_output_shape_range))]
     
@@ -235,7 +236,7 @@ class numerical_dataset_generator(tf.keras.utils.Sequence):
             self.nda['rhs_max_magnitude'] = np.random.rand() * rhs_random_max_magnitude
         if self.randomize_boundary_max_magnitudes:
             self.nda['boundary_max_magnitude'] = dict(zip(list(boundary_random_max_magnitudes.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(boundary_random_max_magnitudes.values())]))
-        inp, out = numerical_dataset(**self.nda)
+        inp, out = numerical_dataset(**self.nda, batch_size = self.batch_size)
         if self.return_keras_style:
             if ('return_boundaries' in self.nda.keys()):
                 if ('return_rhs' in self.nda.keys()) and self.nda['return_rhs']:
