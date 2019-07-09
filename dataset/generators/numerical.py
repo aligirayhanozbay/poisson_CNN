@@ -229,17 +229,17 @@ class numerical_dataset_generator(tf.keras.utils.Sequence):
 
     def __getitem__(self, idx): #Generates a batch. Input idx is ignored but is necessary per Keras API.
         if self.randomize_rhs_smoothness:
-            self.nda['rhs_smoothness'] = np.random.randint(random_smoothness_range[0], high = random_smoothness_range[0])
+            self.nda['rhs_smoothness'] = np.random.randint(self.rhs_random_smoothness_range[0], high = self.rhs_random_smoothness_range[1])
         if self.randomize_boundary_smoothness:
-            self.nda['boundary_smoothness'] = dict(zip(list(boundary_random_smoothness_range.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(boundary_random_smoothness_range.values())]))
+            self.nda['boundary_smoothness'] = dict(zip(list(self.boundary_random_smoothness_range.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(self.boundary_random_smoothness_range.values())]))
         if self.randomize_rhs_max_magnitude:
-            self.nda['rhs_max_magnitude'] = np.random.rand() * rhs_random_max_magnitude
+            self.nda['rhs_max_magnitude'] = np.random.rand() * self.rhs_random_max_magnitude
         if self.randomize_boundary_max_magnitudes:
-            self.nda['boundary_max_magnitude'] = dict(zip(list(boundary_random_max_magnitudes.keys()),[np.random.randint(brsr[0], high = brsr[1]) for brsr in list(boundary_random_max_magnitudes.values())]))
+            self.nda['boundary_max_magnitude'] = dict(zip(list(self.boundary_random_max_magnitudes.keys()),[np.random.rand()*brmm for brmm in list(self.boundary_random_max_magnitudes.values())]))
         inp, out = numerical_dataset(**self.nda, batch_size = self.batch_size)
         if self.return_keras_style:
             if ('return_boundaries' in self.nda.keys()):
-                if ('return_rhs' in self.nda.keys()) and self.nda['return_rhs']:
+                if ('return_rhs' not in self.nda.keys()) or self.nda['return_rhs']:
                     boundary_location = 1
                 else:
                     boundary_location = 0

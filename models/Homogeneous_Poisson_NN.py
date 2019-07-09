@@ -8,6 +8,7 @@ from .Model_With_Integral_Loss import Model_With_Integral_Loss_ABC
 from ..layers import MergeWithAttention
 from ..layers import Upsample
 from ..layers import SpatialPyramidPool
+from ..layers import Scaling
 
 def channels_first_rot_90(image,k=1):
     if len(image.shape) == 4:
@@ -63,13 +64,15 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
         self.dx_dense_1 = tf.keras.layers.Dense(100, activation = tf.nn.relu)
         self.dx_dense_2 = tf.keras.layers.Dense(16, activation = 'linear')
 
+        self.scaling = Scaling()
         
     def call(self, inp):
         self.dx = inp[1]
         inp = inp[0]
         out = self.conv_2(self.conv_1(inp))
         out = self.merge([self.conv_3(out)] + [pb(out) for pb in self.pooling_blocks])
-        return self.conv_6(self.conv_5(tf.einsum('ijkl, ij -> ijkl',self.conv_4(out), 1.0*(0.0+self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx)))))))
+        out = self.conv_6(self.conv_5(tf.einsum('ijkl, ij -> ijkl',self.conv_4(out), 1.0*(0.0+self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx)))))))
+        return self.scaling(out)
 
 class Homogeneous_Poisson_NN_Fourier(Model_With_Integral_Loss_ABC): #variant to include dx info
     def __init__(self, resnet_block_number = 6, filters = [8,16,32,64,16,8], kernel_sizes = [5,5,5,5,5,5], nmodes = (32,32), pyramid_pooling_params = {'levels': [[3,3],6,9,12], 'pooling_type': 'AVG'}, data_format = 'channels_first', **kwargs):
@@ -91,6 +94,8 @@ class Homogeneous_Poisson_NN_Fourier(Model_With_Integral_Loss_ABC): #variant to 
         self.fourier_dense_1 = tf.keras.layers.Dense(500, activation = tf.nn.leaky_relu)
         self.fourier_dense_2 = tf.keras.layers.Dense(tf.reduce_prod(nmodes), activation = lambda x: 4*tf.nn.tanh(x)/np.pi**2)
 
+        self.scaling = Scaling()
+        
         m,n = tf.meshgrid(np.arange(self.nmodes[0])+1,np.arange(self.nmodes[1])+1)
         self.m = tf.expand_dims((tf.cast(m, tf.keras.backend.floatx())**2) * (tf.cast(np.pi, tf.keras.backend.floatx())**2), axis = 0)
         self.n = tf.expand_dims((tf.cast(n, tf.keras.backend.floatx())**2) * (tf.cast(np.pi, tf.keras.backend.floatx())**2), axis = 0)
@@ -132,6 +137,7 @@ class Homogeneous_Poisson_NN_Fourier(Model_With_Integral_Loss_ABC): #variant to 
         amplitudes = amplitudes*(-4.0)/(m+n)
         #Use the fourier coefficients to recover the solutions
         out = oe.contract('bxy,xyij->bij', amplitudes, sine_values, backend = 'tensorflow')
+        out = self.scaling(out)
         if self.data_format == 'channels_first':
             return tf.expand_dims(out, axis = 1)
         else:

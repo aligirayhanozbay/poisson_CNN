@@ -35,7 +35,7 @@ class SpatialPyramidPool(tf.keras.layers.Layer):
                 self.data_format = 'NC' + 'DHW'[(self.maxdims-self.ndims):]
             else:
                 self.data_format = 'N' + 'DHW'[(self.maxdims-self.ndims):] + 'C'
-
+    #@tf.function
     def call(self, inp):
         if self.ndims == None: #build the pooling levels based on input shape if not already determined
             ndims = len(inp.shape) - 2
@@ -53,22 +53,30 @@ class SpatialPyramidPool(tf.keras.layers.Layer):
             data_format = self.data_format
             levels = self.levels
             ndims = self.ndims
-            
-        if data_format[1] == 'C':
-            strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[0][k]), dtype = tf.int32) for k in range(ndims)]
-            windowshape = [strides[k] + (inp.shape[2+k] % levels[0][k]) for k in range(ndims)]
-        else:
-            strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[0][k]), dtype = tf.int32) for k in range(ndims)]
-            windowshape = [strides[k] + (inp.shape[1+k] % levels[0][k]) for k in range(ndims)]
-        out = tf.reshape(tf.nn.pool(inp, window_shape=windowshape, strides=strides, pooling_type=self.pooling_type, padding = 'VALID', data_format=data_format), [inp.shape[0],-1])
-
-        for i in range(1,len(levels)):
+        try:
             if data_format[1] == 'C':
-                strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[i][k]), dtype = tf.int32) for k in range(ndims)]
-                windowshape = [strides[k] + (inp.shape[2+k] % levels[i][k]) for k in range(ndims)]
+                strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[0][k]), dtype = tf.int32) for k in range(ndims)]
+                windowshape = [strides[k] + (inp.shape[2+k] % levels[0][k]) for k in range(ndims)]
             else:
-                strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[i][k]), dtype = tf.int32) for k in range(ndims)]
-                windowshape = [strides[k] + (inp.shape[1+k] % levels[i][k]) for k in range(ndims)]
-            out = tf.concat([out, tf.reshape(tf.nn.pool(inp, window_shape=windowshape, strides=strides, pooling_type=self.pooling_type, padding = 'VALID', data_format=data_format), [inp.shape[0],-1])],1)
-            
+                strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[0][k]), dtype = tf.int32) for k in range(ndims)]
+                windowshape = [strides[k] + (inp.shape[1+k] % levels[0][k]) for k in range(ndims)]
+            out = tf.keras.backend.reshape(tf.nn.pool(inp, window_shape=windowshape, strides=strides, pooling_type=self.pooling_type, padding = 'VALID', data_format=data_format), [inp.shape[0], -1])
+            #out = tf.keras.backend.pool2d(inp, tuple(windowshape), padding = 'valid', data_format = 'channels_first', pool_mode = 'avg', strides = tuple(strides))
+
+            for i in range(1,len(levels)):
+                if data_format[1] == 'C':
+                    strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[i][k]), dtype = tf.int32) for k in range(ndims)]
+                    windowshape = [strides[k] + (inp.shape[2+k] % levels[i][k]) for k in range(ndims)]
+                else:
+                    strides = [tf.cast(tf.math.floor(inp.shape[2+k]/levels[i][k]), dtype = tf.int32) for k in range(ndims)]
+                    windowshape = [strides[k] + (inp.shape[1+k] % levels[i][k]) for k in range(ndims)]
+                out = tf.concat([out, tf.reshape(tf.nn.pool(inp, window_shape=windowshape, strides=strides, pooling_type=self.pooling_type, padding = 'VALID', data_format=data_format), [inp.shape[0],-1])],1)
+        except:
+            print('spp init')
+            if data_format[1] == 'C':
+                out = tf.reduce_max(inp, axis = [2,3])
+            else:
+                out = tf.reduce_max(inp, axis = [1,2])
+            levels = tf.constant(levels)
+            out = tf.tile(out, [1,tf.reduce_sum(tf.reduce_prod(levels, axis = 1))])
         return out
