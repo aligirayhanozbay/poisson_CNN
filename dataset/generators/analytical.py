@@ -54,7 +54,7 @@ def mode_coeff_calculation_multiprocessing_wrapper(args):
     
     return tf.constant(np.array(coefficients), dtype = tf.keras.backend.floatx())
 
-def homogeneous_analytical_dataset(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], n_threads = 16, return_rhs = True, max_magnitude = np.inf, batch_size = 1, expanded_dims = False, return_dx = False):
+def homogeneous_analytical_dataset(rhs = 'random', output_shape = (64,64), nmodes = (16,16), domain = [1,1], n_threads = 1, return_rhs = True, max_magnitude = np.inf, batch_size = 1, expanded_dims = False, return_dx = False):
     '''
     Generates an analytical solution to the Poisson equation with homogeneous Dirichlet (i.e. 0) Boundary conditions in the box x_1 = [0, L_1], ..., x_n = [0, L_n]
     Solution strategy is Fourier series based as outlined in
@@ -85,13 +85,13 @@ def homogeneous_analytical_dataset(rhs = 'random', output_shape = (64,64), nmode
         #\int_0^{L_n} ... \int_0^{L_1} F * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n) dx_1 ... dx_n = A*L_1*...*L_n/2^n
         #Thus the solution to the Poisson equation \nabla^2 u = F will be u = a_{m_1,...,m_n} * sin((m_1+1)*pi*x_1/L_1) * ... * sin((m_n+1)*pi*x_n/L_n))
         #where a_{m_1,...,m_n} = -A_{m_1,...,m_n} * /(((m_1+1)*pi/L_1)^2+...+((m_n+1)*pi/L_n)^2)
-        rhs_function_coeffs = oe.contract('ij,j->ij',2*tf.random.uniform(tf.stack([n_random, mode_permutations.shape[0]]),dtype = tf.keras.backend.floatx())-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.keras.backend.floatx()),axis=1)), backend = 'tensorflow') #Random RHS function Fourier coefficients
+        rhs_function_coeffs = oe.contract('ij,j->ij',2*tf.random.uniform(tf.stack([batch_size, mode_permutations.shape[0]]),dtype = tf.keras.backend.floatx())-1,tf.exp(-tf.reduce_sum(tf.cast(mode_permutations, tf.keras.backend.floatx()),axis=1)), backend = 'tensorflow') #Random RHS function Fourier coefficients
         soln_function_coeffs = -oe.contract('ij,j->ij',rhs_function_coeffs, tf.reduce_sum(tf.square(mplus1_pi_over_L),axis=1)**(-1), backend = 'tensorflow') #Random solution Fourier coefficients
         
         
         rhs = tf.Variable(oe.contract('ij,j...->i...', rhs_function_coeffs, sine_vals, backend = 'tensorflow'))
         soln = tf.Variable(oe.contract('ij,j...->i...', soln_function_coeffs, sine_vals, backend = 'tensorflow'))
-        maxminratio = np.zeros((n_random))
+        maxminratio = np.zeros((batch_size))
         
         if max_magnitude != np.inf:
             for i in range(int(rhs.shape[0])):
@@ -124,9 +124,12 @@ def homogeneous_analytical_dataset(rhs = 'random', output_shape = (64,64), nmode
         soln = tf.expand_dims(soln, axis = 1)
     inp = []
     if return_rhs:
-        inp.append(rhses)
+        inp.append(rhs)
     if return_dx:
+        dx = [[domain[k]/(output_shape[k]-1) for k in range(len(domain))]]
+        dx = tf.tile(tf.constant(dx, dtype = tf.keras.backend.floatx()), [batch_size, 1])
         inp.append(dx)
+    return inp, soln
             
         
 def random_calculation_multiprocessing_wrapper(args):
@@ -142,14 +145,76 @@ def random_calculation_multiprocessing_wrapper(args):
         rhses.append(rhs)
         solns.append(solns)
     return np.concatenate(rhses), np.concatenate(solns)
-        
-def homogeneous_analytical_dataset_generator(randomize_output_shape = False, random_output_shape_range = [[64,85],[64,85]], randomize_domain = False, random_domain_range = [[0.5,1],[0.5,1]], randomize_nmodes = False, random_nmodes_range = [[16,64],[16,64]], **homogeneous_analytical_dataset_arguments):
-    while True:
-        if randomize_output_shape:
-            homogeneous_analytical_dataset_arguments['output_shape'] = [np.random.randint(random_output_shape_range[k][0], high = random_output_shape_range[k][1]) for k in range(len(random_output_shape_range))]
-        if randomize_domain:
-            homogeneous_analytical_dataset_arguments['domain'] = [np.random.randint(random_domain_range[k][0], high = random_domain_range[k][1]) for k in range(len(random_domain_range))]
-        if randomize_nmodes:
-            homogeneous_analytical_dataset_arguments['nmodes'] = [np.random.randint(random_nmodes_range[k][0], high = random_nmodes_range[k][1]) for k in range(len(random_nmodes_range))]
 
-        yield homogeneous_analytical_dataset(**homogeneous_analytical_dataset_arguments)
+class homogeneous_analytical_dataset_generator(tf.keras.utils.Sequence):
+    def __init__(self, batch_size = 1, batches_per_epoch = 1, nmodes = 'random', domain = 'random', output_shape = 'random', randomize_rhs_max_magnitude = False, nmodes_random_range = [[8,24],[8,24]], random_output_shape_range = [[64,85],[64,85]], domain_random_range = [[0.5,1.5],[0.5,1.5]], rhs_random_max_magnitude = 1.0, keep_dx_constant = True, **analytical_dataset_arguments):
+        '''
+        Creates a generator that can be used to generate infinitely many sets of Poisson eq. RHSes-BCs-solutions
+        
+        batch_size: Int. Batch size of outputs.
+        batches_per_epoch: Int. No of batches to create in each training epoch.
+        randomize_rhs_smoothness: Boolean. Set to True if it's desired to have random RHS smoothnesses.
+        rhs_random_smoothness_range: List of 2 integers. First integer is the lower bound and 2nd integer is the upper bound of the random RHS smoothnesses. Ignored if randomize_rhs_smoothness is False.
+        randomize_boundary_smoothness: Boolean. Set to True if it's desired to have random BC smoothnesses.
+        boundary_random_smoothness_range: Dict containing entries 'left', 'top', 'right', 'bottom'. Each entry must be the same format as rhs_random_smoothness_range
+        randomize_rhs_max_magnitude: Boolean. Set to True if it's desired to have random RHS magnitudes.
+        rhs_random_max_magnitude: Float. Max value of the random max magnitude.
+        randomize_boundary_max_magnitude: Boolean. Set to True if it's desired to have random BC magnitudes.
+        boundary_random_max_magnitude: Dict containing entries 'left', 'top', 'right', 'bottom'. Each entry must be the same format as rhs_random_max_magnitude.
+        numerical_dataset_arguments: Arguments to pass onto the function numerical_dataset.
+        return_keras_style: If set to True, the values from the boundaries dict will be unpacked (in the order left-top-right-bottom) into members of the output list.
+        exclude_zero_boundaries: If set to True, nonzero boundaries are not returned if return_keras_style is True.
+        '''
+
+        self.nmodes = nmodes
+        if self.nmodes == 'random':
+            self.nmodes_random_range = nmodes_random_range
+        self.domain = domain
+        if self.domain == 'random':
+            self.domain_random_range = domain_random_range
+        self.output_shape = output_shape
+        if self.output_shape == 'random':
+            self.random_output_shape_range = random_output_shape_range
+        self.randomize_rhs_max_magnitude = randomize_rhs_max_magnitude
+        if self.randomize_rhs_max_magnitude:
+            self.rhs_random_max_magnitude = rhs_random_max_magnitude
+
+        self.batch_size = batch_size
+        self.batches_per_epoch = batches_per_epoch
+        self.ada = analytical_dataset_arguments
+        self.keep_dx_constant = keep_dx_constant
+
+    def __len__(self):
+        return self.batches_per_epoch
+
+    def __getitem__(self, idx): #Generates a batch. Input idx is ignored but is necessary per Keras API.
+
+        if self.randomize_rhs_max_magnitude:
+            self.ada['rhs_max_magnitude'] = np.random.rand() * self.rhs_random_max_magnitude
+
+        if self.nmodes == 'random':
+            self.ada['nmodes'] = tuple([int(np.random.randint(self.nmodes_random_range[k][0], high = self.nmodes_random_range[k][1])) for k in range(len(self.nmodes_random_range))])
+        else:
+            self.ada['nmodes'] = self.nmodes
+
+        if self.output_shape == 'random':
+            self.ada['output_shape'] = tuple([int(np.random.randint(self.random_output_shape_range[k][0], high = self.random_output_shape_range[k][1])) for k in range(len(self.random_output_shape_range))])
+        else:
+            self.ada['output_shape'] = self.output_shape
+
+        if self.domain == 'random' and self.keep_dx_constant:
+            self.ada['domain'] = [np.random.rand()*(self.domain_random_range[0][1] - self.domain_random_range[0][0]) + self.domain_random_range[0][0]]
+            dx = self.ada['domain'][0]/(self.ada['output_shape'][0] - 1)
+            for k in range(1, len(self.domain_random_range)):
+                self.ada['domain'].append(dx * (self.ada['output_shape'][k] - 1))
+        elif self.domain == 'random':
+            self.ada['domain'] = [np.random.rand()*(self.domain_random_range[k][1] - self.domain_random_range[k][0]) + self.domain_random_range[k][0] for k in range(len(self.domain_random_range))]
+        
+            
+        inp, out = homogeneous_analytical_dataset(**self.ada, batch_size = self.batch_size)
+
+        if self.keep_dx_constant:
+            inp[1] = tf.expand_dims(inp[1][:,0], axis = 1)
+        return inp, out
+        
+
