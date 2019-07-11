@@ -36,7 +36,7 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
         super().__init__(**kwargs)
         self.pooling_block_number = pooling_block_number
         self.data_format = data_format
-        self.pooling_block_kernel_sizes = 3 * np.ones((self.pooling_block_number), dtype = np.int32)
+        self.pooling_block_kernel_sizes = 5 * np.ones((self.pooling_block_number), dtype = np.int32)
         self.pooling_block_kernel_sizes[-2:] = 1
         self.pooling_block_kernel_sizes = list(self.pooling_block_kernel_sizes)
         
@@ -47,18 +47,32 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
                 self.resize_methods = [tf.image.ResizeMethod.BICUBIC for i in range(self.pooling_block_number-2)] + [tf.image.ResizeMethod.BILINEAR, tf.image.ResizeMethod.NEAREST_NEIGHBOR]
         else:
             self.resize_methods = resize_methods
+
+        self.pooling_block_filters = 24
         
-        self.conv_1 = tf.keras.layers.Conv2D(filters = 8, kernel_size = 3, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
-        self.conv_2 = tf.keras.layers.Conv2D(filters = 16, kernel_size = 3, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
-        self.conv_3 = tf.keras.layers.Conv2D(filters = 32, kernel_size = 3, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
+        self.conv_1 = tf.keras.layers.Conv2D(filters = 8, kernel_size = 7, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
+        #self.batchnorm_1 = tf.keras.layers.BatchNormalization(axis = 1)
         
-        self.pooling_blocks = [AveragePoolingBlock(2**(i+1), resize_method = self.resize_methods[i], data_format = data_format, kernel_size = int(self.pooling_block_kernel_sizes[i]), filters = 32, activation = tf.nn.leaky_relu, use_resnetblocks = False) for i in range(pooling_block_number)]
+        self.conv_2 = tf.keras.layers.Conv2D(filters = self.pooling_block_filters, kernel_size = 7, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
+        #self.batchnorm_2 = tf.keras.layers.BatchNormalization(axis = 1)
+        
+        self.conv_3 = tf.keras.layers.Conv2D(filters = self.pooling_block_filters, kernel_size = 7, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
+        
+        self.pooling_blocks = [AveragePoolingBlock(2**(i+1), resize_method = self.resize_methods[i], data_format = data_format, kernel_size = int(self.pooling_block_kernel_sizes[i]), filters = self.pooling_block_filters, activation = tf.nn.leaky_relu, use_resnetblocks = True, use_deconv_upsample = True) for i in range(pooling_block_number)]
         
         self.merge = MergeWithAttention()
+
+        #self.batchnorm_4 = tf.keras.layers.BatchNormalization(axis = 1)
+        self.conv_4 = tf.keras.layers.Conv2D(filters = 16, kernel_size = 7, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
+        self.resnet_4 = ResnetBlock(filters = 16, kernel_size = 7, activation=tf.nn.leaky_relu, data_format=data_format)
         
-        self.conv_4 = tf.keras.layers.Conv2D(filters = 16, kernel_size = 3, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
-        self.conv_5 = tf.keras.layers.Conv2D(filters = 5, kernel_size = 3, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
-        self.conv_6 = tf.keras.layers.Conv2D(filters = 1, kernel_size = 3, activation='linear', data_format=data_format, padding='same')
+        #self.batchnorm_5 = tf.keras.layers.BatchNormalization(axis = 1)
+        self.conv_5 = tf.keras.layers.Conv2D(filters = 8, kernel_size = 7, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
+        self.resnet_5 = ResnetBlock(filters = 8, kernel_size = 7, activation=tf.nn.leaky_relu, data_format=data_format)
+        
+        #self.batchnorm_6 = tf.keras.layers.BatchNormalization(axis = 1)
+        self.conv_6 = tf.keras.layers.Conv2D(filters = 1, kernel_size = 7, activation='linear', data_format=data_format, padding='same')
+        self.resnet_6 = ResnetBlock(filters = 1, kernel_size = 7, activation='linear', data_format=data_format)
         
         self.dx_dense_0 = tf.keras.layers.Dense(100, activation = tf.nn.relu)
         self.dx_dense_1 = tf.keras.layers.Dense(100, activation = tf.nn.relu)
@@ -69,9 +83,29 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
     def call(self, inp):
         self.dx = inp[1]
         inp = inp[0]
-        out = self.conv_2(self.conv_1(inp))
+
+        out = self.conv_1(inp)
+        #out = self.batchnorm_1(out)
+        
+        out = self.conv_2(out)
+        #out = self.batchnorm_2(out)
+        
         out = self.merge([self.conv_3(out)] + [pb(out) for pb in self.pooling_blocks])
-        out = self.conv_6(self.conv_5(tf.einsum('ijkl, ij -> ijkl',self.conv_4(out), 1.0*(0.0+self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx)))))))
+
+        #out = self.batchnorm_4(out)
+        out = self.conv_4(out)
+        out = self.resnet_4(out)
+        
+        out = tf.einsum('ijkl, ij -> ijkl',out, 1.0*(0.0+self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx)))))
+
+        #out = self.batchnorm_5(out)
+        out = self.conv_5(out)
+        out = self.resnet_5(out)
+
+        #out = self.batchnorm_6(out)
+        out = self.conv_6(out)
+        out = self.resnet_6(out)
+        
         return self.scaling(out)
 
 class Homogeneous_Poisson_NN_Fourier(Model_With_Integral_Loss_ABC): #variant to include dx info
@@ -94,7 +128,7 @@ class Homogeneous_Poisson_NN_Fourier(Model_With_Integral_Loss_ABC): #variant to 
         self.fourier_dense_1 = tf.keras.layers.Dense(500, activation = tf.nn.leaky_relu)
         self.fourier_dense_2 = tf.keras.layers.Dense(tf.reduce_prod(nmodes), activation = lambda x: 4*tf.nn.tanh(x)/np.pi**2)
 
-        self.scaling = Scaling()
+        #self.scaling = Scaling()
         
         m,n = tf.meshgrid(np.arange(self.nmodes[0])+1,np.arange(self.nmodes[1])+1)
         self.m = tf.expand_dims((tf.cast(m, tf.keras.backend.floatx())**2) * (tf.cast(np.pi, tf.keras.backend.floatx())**2), axis = 0)
@@ -137,7 +171,7 @@ class Homogeneous_Poisson_NN_Fourier(Model_With_Integral_Loss_ABC): #variant to 
         amplitudes = amplitudes*(-4.0)/(m+n)
         #Use the fourier coefficients to recover the solutions
         out = oe.contract('bxy,xyij->bij', amplitudes, sine_values, backend = 'tensorflow')
-        out = self.scaling(out)
+        #out = self.scaling(out)
         if self.data_format == 'channels_first':
             return tf.expand_dims(out, axis = 1)
         else:

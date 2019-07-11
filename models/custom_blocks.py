@@ -3,7 +3,7 @@ import itertools
 import opt_einsum as oe
 import numpy as np
 
-from ..layers import Upsample
+from ..layers import Upsample, DeconvUpscale2D
 
 class SepConvBlock(tf.keras.models.Model):
     def __init__(self, data_format = 'channels_first', separable_kernel_size  = (5,256), nonsep_kernel_size = 5, separable_activation = tf.nn.leaky_relu, nonsep_activation = tf.nn.leaky_relu, separable_filters = 8, nonsep_filters = 4):
@@ -49,12 +49,19 @@ class ResampledConvolutionBlock(tf.keras.models.Model):
             out = convblock(out)
         return out
 
+    
+    
 class AveragePoolingBlock(tf.keras.models.Model):
-    def __init__(self, pool_size = 2, data_format = 'channels_first', resize_method = tf.image.ResizeMethod.BICUBIC, use_resnetblocks = False, **convblockargs):
+    def __init__(self, pool_size = 2, data_format = 'channels_first', resize_method = tf.image.ResizeMethod.BICUBIC, use_resnetblocks = False, use_deconv_upsample = False, **convblockargs):
         super().__init__()
         self.data_format = data_format
         self.pool = tf.keras.layers.AveragePooling2D(data_format = data_format, pool_size = pool_size, padding = 'same')
-        self.upsample = Upsample([-1,-1],resize_method=resize_method, data_format = data_format)
+        self.use_deconv_upsample = use_deconv_upsample
+        
+        if not use_deconv_upsample:
+            self.upsample = Upsample([-1,-1],resize_method=resize_method, data_format = data_format)
+        else:
+            self.upsample = DeconvUpscale2D(pool_size, data_format = data_format, **convblockargs)
 
         if not use_resnetblocks:
             self.pooledconv = tf.keras.layers.Conv2D(data_format = data_format, padding='same', **convblockargs)
@@ -62,9 +69,11 @@ class AveragePoolingBlock(tf.keras.models.Model):
         else:
             self.pooledconv = ResnetBlock(data_format = data_format, **convblockargs)
             self.upsampledconv = ResnetBlock(data_format = data_format, **convblockargs)
+
     def call(self, inp):
         if self.data_format == 'channels_first':
             input_shape = [inp.shape[-2], inp.shape[-1]]
         else:
             input_shape = [inp.shape[-3],inp.shape[-2]]
         return self.upsampledconv(self.upsample([self.pooledconv(self.pool(inp)), input_shape]))
+        
