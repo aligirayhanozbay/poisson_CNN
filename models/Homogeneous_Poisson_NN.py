@@ -34,11 +34,13 @@ def channels_first_rot_90(image,k=1):
 class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to include dx info
     def __init__(self, pooling_block_number = 6, post_dx_einsum_conv_block_number = 5, initial_kernel_size = 21, final_kernel_size = 31, resize_methods = None, data_format = 'channels_first', use_batchnorm = False, use_deconv_upsample = False, **kwargs):
         super().__init__(**kwargs)
+        self.training = True
         self.pooling_block_number = pooling_block_number
         self.data_format = data_format
         self.pooling_block_kernel_sizes = 9 * np.ones((self.pooling_block_number), dtype = np.int32)
         self.pooling_block_kernel_sizes[-2:] = 3
         self.pooling_block_kernel_sizes = list(self.pooling_block_kernel_sizes)
+        self.use_batchnorm = use_batchnorm
 
         final_dense_layer_units = 32
         
@@ -73,15 +75,23 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
 
         self.post_dx_einsum_conv_blocks = []
         for k in range(post_dx_einsum_conv_block_number):
-            if use_batchnorm:
-                if self.data_format == 'channels_first':
-                    self.post_dx_einsum_conv_blocks.append(tf.keras.layers.BatchNormalization(axis = 1))
-                else:
-                    self.post_dx_einsum_conv_blocks.append(tf.keras.layers.BatchNormalization(axis = 3))
+            block = []
+            block.append(tf.keras.layers.Conv2D(filters = final_dense_layer_units-k*(final_dense_layer_units//(self.pooling_block_number-1)), kernel_size = initial_kernel_size + k*((final_kernel_size - initial_kernel_size)//(self.pooling_block_number-1)), activation=tf.nn.leaky_relu, data_format=data_format, padding='same'))
+            block.append(ResnetBlock(filters = final_dense_layer_units-k*(final_dense_layer_units//(self.pooling_block_number-1)), kernel_size = initial_kernel_size + k*((final_kernel_size - initial_kernel_size)//(self.pooling_block_number-1)), activation=tf.nn.leaky_relu, data_format=data_format))
+            self.post_dx_einsum_conv_blocks.append(block)
 
-            self.post_dx_einsum_conv_blocks.append(tf.keras.layers.Conv2D(filters = final_dense_layer_units-k*(final_dense_layer_units//(self.pooling_block_number-1)), kernel_size = initial_kernel_size + k*((final_kernel_size - initial_kernel_size)//(self.pooling_block_number-1)), activation=tf.nn.leaky_relu, data_format=data_format, padding='same'))
-            self.post_dx_einsum_conv_blocks.append(ResnetBlock(filters = final_dense_layer_units-k*(final_dense_layer_units//(self.pooling_block_number-1)), kernel_size = initial_kernel_size + k*((final_kernel_size - initial_kernel_size)//(self.pooling_block_number-1)), activation=tf.nn.leaky_relu, data_format=data_format))
-        
+        if use_batchnorm:
+            self.batchnorm_layers = []
+            if self.data_format == 'channels_first':
+                self.batchnorm_last = tf.keras.layers.BatchNormalization(axis = 1)
+            else:
+                self.batchnorm_last = tf.keras.layers.BatchNormalization(axis = -1)
+            for k in range(post_dx_einsum_conv_block_number):
+                if self.data_format == 'channels_first':
+                    self.batchnorm_layers.append(tf.keras.layers.BatchNormalization(axis = 1))
+                else:
+                    self.batchnorm_layers.append(tf.keras.layers.BatchNormalization(axis = -1))
+
         self.conv_last = tf.keras.layers.Conv2D(filters = 1, kernel_size = final_kernel_size, activation=tf.nn.leaky_relu, data_format=data_format, padding='same')
         self.resnet_last = ResnetBlock(filters = 1, kernel_size = final_kernel_size, activation='linear', data_format=data_format)
         
@@ -109,13 +119,23 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
         
         out = tf.einsum('ijkl, ij -> ijkl',out, self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx))))
 
-        for layer in self.post_dx_einsum_conv_blocks:
-            out = layer(out)
-        
+        for block_num, block in enumerate(self.post_dx_einsum_conv_blocks):
+            for layer in block:
+                out = layer(out)
+            if self.use_batchnorm:
+                out = self.batchnorm_layers[block_num](out, training = self.training)
+
+        if self.use_batchnorm:
+            out = self.batchnorm_last(out, training = self.training)
         out = self.conv_last(out)
         out = self.resnet_last(out)
         
         return self.scaling(out)
+
+    def __call__(self, inp, training = True):
+        self.training = training
+        return super().__call__(inp)
+    
 
 class Homogeneous_Poisson_NN_Fourier(Model_With_Integral_Loss_ABC): #variant to include dx info
     def __init__(self, resnet_block_number = 6, filters = [8,16,32,64,16,8], kernel_sizes = [5,5,5,5,5,5], nmodes = (32,32), pyramid_pooling_params = {'levels': [[3,3],6,9,12], 'pooling_type': 'AVG'}, data_format = 'channels_first', **kwargs):
