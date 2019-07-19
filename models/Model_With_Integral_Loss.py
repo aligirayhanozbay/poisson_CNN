@@ -18,7 +18,7 @@ class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
     def integral_loss(self, y_true, y_pred):
         try: #try except block to handle keras model init shenanigans
             if self.data_format == 'channels_first':
-                c = 0.5* tf.concat([self.dx * int(y_true.shape[-2]), self.dx * int(y_true.shape[-1])],1)
+                c = 0.5* tf.concat([self.dx * (int(y_true.shape[-2])-1), self.dx * (int(y_true.shape[-1])-1)],1)
                 coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-2]),np.linspace(-1, 1, y_true.shape[-1]),indexing = 'xy'), dtype = tf.keras.backend.floatx()).transpose((1,2,0)) #coordinates of each grid pt in the domain
             else:
                 c = 0.5 * tf.concat([self.dx * int(y_true.shape[-3]), self.dx * int(y_true.shape[-2])],1)
@@ -87,9 +87,11 @@ class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
             interp_pts = tf.squeeze(tf.gather_nd(tf.transpose(y_true - y_pred, (1,2,3,0)), index_combinations), axis = 3)
 
         values_at_quad_pts = oe.contract('ijkl, ijk->ijl', interp_pts, b, backend = 'tensorflow')
-
-        loss = tf.reduce_mean(tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1))**(1/self.p))
-
+    
+        inverse_domain_area = 1/tf.reduce_prod(2*c, axis = 1)
+        #loss = tf.reduce_mean(tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1))**(1/self.p))
+        loss = tf.reduce_mean(oe.contract('i,i...->i...',inverse_domain_area,tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1)))**(1/self.p))
+        
         if self.mae_component_weight != 0.0:
             loss = loss + self.mae_component_weight * tf.reduce_mean(tf.keras.losses.mean_absolute_error(y_true, y_pred))
         if self.mse_component_weight != 0.0:

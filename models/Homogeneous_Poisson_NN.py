@@ -75,9 +75,11 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
 
         self.post_dx_einsum_conv_blocks = []
         for k in range(post_dx_einsum_conv_block_number):
+            ksize = initial_kernel_size + (k*(final_kernel_size - initial_kernel_size)//(post_dx_einsum_conv_block_number-1))
+            filters = final_dense_layer_units-((k*final_dense_layer_units)//(post_dx_einsum_conv_block_number))
             block = []
-            block.append(tf.keras.layers.Conv2D(filters = final_dense_layer_units-k*(final_dense_layer_units//(self.pooling_block_number-1)), kernel_size = initial_kernel_size + k*((final_kernel_size - initial_kernel_size)//(self.pooling_block_number-1)), activation=tf.nn.leaky_relu, data_format=data_format, padding='same'))
-            block.append(ResnetBlock(filters = final_dense_layer_units-k*(final_dense_layer_units//(self.pooling_block_number-1)), kernel_size = initial_kernel_size + k*((final_kernel_size - initial_kernel_size)//(self.pooling_block_number-1)), activation=tf.nn.leaky_relu, data_format=data_format))
+            block.append(tf.keras.layers.Conv2D(filters = filters, kernel_size = ksize, activation=tf.nn.leaky_relu, data_format=data_format, padding='same'))
+            block.append(ResnetBlock(filters = filters, kernel_size = ksize, activation=tf.nn.leaky_relu, data_format=data_format))
             self.post_dx_einsum_conv_blocks.append(block)
 
         if use_batchnorm:
@@ -103,9 +105,12 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
         
     def call(self, inp):
         self.dx = inp[1]
-        inp = inp[0]
+        if self.data_format == 'channels_first':
+            domain_info = tf.einsum('ij,j->ij',tf.tile(inp[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[2]), tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[3]), tf.keras.backend.floatx())], axis = 0))#, backend = 'tensorflow')
+        else:
+            domain_info = tf.einsum('ij,j->ij',tf.tile(inp[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[1]), tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[2]), tf.keras.backend.floatx())], axis = 0))
 
-        out = self.conv_1(inp)
+        out = self.conv_1(inp[0])
         #out = self.batchnorm_1(out)
         
         out = self.conv_2(out)
@@ -117,10 +122,12 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
         out = self.dx_einsum_conv(out)
         out = self.dx_einsum_resnet(out)
         
-        out = tf.einsum('ijkl, ij -> ijkl',out, self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(self.dx))))
+        out = tf.einsum('ijkl, ij -> ijkl',out, self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(domain_info))))
 
         for block_num, block in enumerate(self.post_dx_einsum_conv_blocks):
             for layer in block:
+                print(block_num)
+                print(out.shape)
                 out = layer(out)
             if self.use_batchnorm:
                 out = self.batchnorm_layers[block_num](out, training = self.training)
