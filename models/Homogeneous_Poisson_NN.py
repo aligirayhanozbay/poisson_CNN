@@ -31,8 +31,27 @@ def channels_first_rot_90(image,k=1):
     else:
         return image[...,0]
     
-class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to include dx info
+class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC):
+    '''
+    Takes a tf.Tensor containing the RHS and grid spacing information, and gives the corresponding solution to the Poisson problem with homogeneous BCs.
+    '''
     def __init__(self, pooling_block_number = 6, post_dx_einsum_conv_block_number = 5, initial_kernel_size = 19, final_kernel_size = 3, resize_methods = None, data_format = 'channels_first', use_batchnorm = False, use_deconv_upsample = False, kernel_regularizer = None, bias_regularizer = None, **kwargs):
+        '''
+        Init arguments:
+
+        data_format: same as keras
+        pooling_block_number: integer. controls the number of simultaneous pooling 'threads'. each pooling thread will apply average pooling with pool_size 2^k (k = [1,...,pooling_block_number]), do convoltuions and then upsample to original resolution. choose such 2^(pooling_block_number) is close as possible to the minimum grid size your inputs will have.
+        use_deconv_upsample: boolean. if set to true, pooling blocks will use transposed convolution to upsample. last 2 pooling layers will use bilinear and nearest neighbor unless overridden by resize_methods
+        resize_methods: list of tf.image.ResizeMethod members. used to choose resizing algorithms for pooling block upsampling.
+        use_batchnorm: boolean. determines if batch norm layers should be used. if set to true, supply __call__ argument training = False when performing inference.
+        post_dx_einsum_conv_block_number: integer. no of convolution blocks after the result of the domain info processing is merged.
+        initial_kernel_size: integer. initial kernel size of convolutions. most convolutions will have this kernel size.
+        final_kernel_size: integer. the kernel size of the final convolutions will progressively move towards this number. keep it small to prevent output artefacting near image edges.
+        kernel_regularizer: same as the corresponding tf.keras.layers.Conv2D argument
+        bias_regularizer: same as the corresponding tf.keras.layers.Conv2D argument
+
+        **kwargs: used to set self.integral_loss parameters for the Model_With_Integral_Loss_ABC abstract base class
+        '''
         super().__init__(**kwargs)
         self.training = True
         self.pooling_block_number = pooling_block_number
@@ -44,7 +63,7 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
 
         final_dense_layer_units = 32
         
-        if not resize_methods:
+        if not resize_methods: #set resizing methods for pooling blocks if using bicubic upsampling
             try:
                 self.resize_methods = [tf.compat.v1.image.ResizeMethod.BICUBIC for i in range(self.pooling_block_number-2)] + [tf.compat.v1.image.ResizeMethod.BILINEAR, tf.compat.v1.image.ResizeMethod.NEAREST_NEIGHBOR]
             except:
@@ -104,6 +123,12 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
         self.scaling = Scaling(downsampling_ratio_per_stage = 3, stages = 3, data_format = self.data_format, filters = 4, activation = tf.nn.leaky_relu, kernel_size = final_kernel_size, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
         
     def call(self, inp):
+        '''
+        input arguments:
+        
+        inp[0]: tf.Tensor of shape (batch_size, 1, nx, ny) or (batch_size, nx, ny, 1) based on self.data_format. this is the RHSes.
+        inp[1]: tf.Tensor of shape (batch_size, 1). this must be the grid spacing information.
+        '''
         self.dx = inp[1]
         if self.data_format == 'channels_first':
             domain_info = tf.einsum('ij,j->ij',tf.tile(inp[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[2]), tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[3]), tf.keras.backend.floatx())], axis = 0))#, backend = 'tensorflow')
@@ -137,7 +162,7 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to
         
         return self.scaling([out, inp[0]])
 
-    def __call__(self, inp, training = True):
+    def __call__(self, inp, training = True):#overload __call__ to allow freezing batch norm parameters
         self.training = training
         return super().__call__(inp)
     
