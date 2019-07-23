@@ -32,7 +32,7 @@ def channels_first_rot_90(image,k=1):
         return image[...,0]
     
 class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC): #variant to include dx info
-    def __init__(self, pooling_block_number = 6, post_dx_einsum_conv_block_number = 5, initial_kernel_size = 21, final_kernel_size = 31, resize_methods = None, data_format = 'channels_first', use_batchnorm = False, use_deconv_upsample = False, kernel_regularizer = None, bias_regularizer = None, **kwargs):
+    def __init__(self, pooling_block_number = 6, post_dx_einsum_conv_block_number = 5, initial_kernel_size = 19, final_kernel_size = 3, resize_methods = None, data_format = 'channels_first', use_batchnorm = False, use_deconv_upsample = False, kernel_regularizer = None, bias_regularizer = None, **kwargs):
         super().__init__(**kwargs)
         self.training = True
         self.pooling_block_number = pooling_block_number
