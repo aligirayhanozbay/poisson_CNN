@@ -40,7 +40,7 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC):
         Init arguments:
 
         data_format: same as keras
-        pooling_block_number: integer. controls the number of simultaneous pooling 'threads'. each pooling thread will apply average pooling with pool_size 2^k (k = [1,...,pooling_block_number]), do convoltuions and then upsample to original resolution. choose such 2^(pooling_block_number) is close as possible to the minimum grid size your inputs will have.
+        pooling_block_number: integer. controls the number of simultaneous pooling 'threads'. each pooling thread will apply average pooling with pool_size 2^k (k = [1,...,pooling_block_number]), do convoltuions and then upsample to original resolution. choose such that 2^(pooling_block_number) is close as possible to the minimum grid size your inputs will have.
         use_deconv_upsample: boolean. if set to true, pooling blocks will use transposed convolution to upsample. last 2 pooling layers will use bilinear and nearest neighbor unless overridden by resize_methods
         resize_methods: list of tf.image.ResizeMethod members. used to choose resizing algorithms for pooling block upsampling.
         use_batchnorm: boolean. determines if batch norm layers should be used. if set to true, supply __call__ argument training = False when performing inference.
@@ -130,26 +130,22 @@ class Homogeneous_Poisson_NN_Fluidnet(Model_With_Integral_Loss_ABC):
         inp[1]: tf.Tensor of shape (batch_size, 1). this must be the grid spacing information.
         '''
         self.dx = inp[1]
-        if self.data_format == 'channels_first':
+        if self.data_format == 'channels_first':#compute domain info
             domain_info = tf.einsum('ij,j->ij',tf.tile(inp[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[2]), tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[3]), tf.keras.backend.floatx())], axis = 0))#, backend = 'tensorflow')
         else:
             domain_info = tf.einsum('ij,j->ij',tf.tile(inp[1], [1,3]), tf.stack([tf.constant(1.0, dtype = tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[1]), tf.keras.backend.floatx()), tf.cast(tf.constant(inp[0].shape[2]), tf.keras.backend.floatx())], axis = 0))
 
-        out = self.conv_1(inp[0])
-        #out = self.batchnorm_1(out)
-        
+        out = self.conv_1(inp[0]) #initial convolutions
         out = self.conv_2(out)
-        #out = self.batchnorm_2(out)
         
-        out = self.merge([self.conv_3(out)] + [pb(out) for pb in self.pooling_blocks])
+        out = self.merge([self.conv_3(out)] + [pb(out) for pb in self.pooling_blocks])#pooling 'threads'
 
-        #out = self.batchnorm_4(out)
         out = self.dx_einsum_conv(out)
         out = self.dx_einsum_resnet(out)
         
-        out = tf.einsum('ijkl, ij -> ijkl',out, self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(domain_info))))
+        out = tf.einsum('ijkl, ij -> ijkl',out, self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(domain_info)))) #incorporate domain info
 
-        for block_num, block in enumerate(self.post_dx_einsum_conv_blocks):
+        for block_num, block in enumerate(self.post_dx_einsum_conv_blocks): #perform additional convolutions
             for layer in block:
                 out = layer(out)
             if self.use_batchnorm:

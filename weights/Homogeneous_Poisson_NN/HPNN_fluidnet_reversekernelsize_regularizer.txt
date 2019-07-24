@@ -1,2 +1,45 @@
+-------Model-------
 poisson_CNN.models.Homogeneous_Poisson_NN_Fluidnet(data_format = channels_first, mae_component_weight = 1e+0, mse_component_weight = 1e+1, pooling_block_number=7, n_quadpts = 47, use_deconv_upsample=True, use_batchnorm = False, initial_kernel_size=19, final_kernel_size=3, post_dx_einsum_conv_block_number=9, kernel_regularizer=tf.keras.regularizers.L1L2(l2 = 1e-4), bias_regularizer=tf.keras.regularizers.L1L2(l2 = 1e-4))
+
+-------Dataset-------
+class dataset_generator(tf.keras.utils.Sequence):
+    def __init__(self, p = 0.5, numerical_dataset_generator = None, analytical_dataset_generator = None, batch_size = 1, batches_per_epoch = 50, numerical_dataset_generator_args = {}, analytical_dataset_generator_args = {}):
+        self.p = p
+        
+        if numerical_dataset_generator is None:
+            self.ndga = numerical_dataset_generator_args
+            self.ndg = poisson_CNN.generators.numerical_dataset_generator(batch_size=batch_size, batches_per_epoch=batches_per_epoch, **self.ndga)
+        else:
+            self.ndg = numerical_dataset_generator
+            
+        if analytical_dataset_generator is None:
+            self.adga = analytical_dataset_generator_args
+            self.adg = poisson_CNN.generators.homogeneous_analytical_dataset_generator(batch_size=batch_size, batches_per_epoch=batches_per_epoch, **self.adga)
+        else:
+            self.adg = analytical_dataset_generator
+        
+        self.batches_per_epoch = self.ndg.batches_per_epoch
+        
+        super().__init__()
+    def __len__(self):
+        return self.batches_per_epoch
+    
+    def __getitem__(self, idx):
+        roll = np.random.rand()
+        if roll > self.p:
+            return self.ndg.__getitem__(idx)
+        else:
+            return self.adg.__getitem__(idx)
+bsize = 10
+output_shape_range = [[192,228],[192,228]]#[[64,85],[64,85]]
+ndg = poisson_CNN.dataset.generators.numerical_dataset_generator(batch_size = bsize, batches_per_epoch = 50, rhses = 'random', return_rhs = True, return_boundaries = False, randomize_rhs_smoothness = True, nonzero_boundaries = [], return_keras_style=False, return_dx = True, return_shape = False, random_output_shape_range = output_shape_range, rhs_random_smoothness_range=[5,10])
+adg = poisson_CNN.dataset.generators.homogeneous_analytical_dataset_generator(batch_size=bsize, batches_per_epoch=50, return_dx = True, expanded_dims = True, max_magnitude = 1.0, random_output_shape_range=output_shape_range)
+
+dg = dataset_generator(p = -1.0, numerical_dataset_generator = ndg, analytical_dataset_generator = adg)
+
+---Training parameters---
+cb = [tf.keras.callbacks.ModelCheckpoint('HPNN_fluidnet_reversekernelsize_regularizer.h5', monitor='mse', verbose=1, save_best_only=True, save_weights_only=True), tf.keras.callbacks.ReduceLROnPlateau(monitor='mse', min_lr = 1e-8, verbose = True, patience = 5)]
+mod.compile(loss = mod.integral_loss, optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-5), metrics = ['mse', 'mae'])
+mod.run_eagerly = True
+mod.fit_generator(generator=dg, epochs=5000, callbacks=cb)
 

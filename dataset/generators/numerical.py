@@ -36,7 +36,7 @@ def image_resize(image, newshape, data_format = 'channels_first', resize_method 
     return out
 
 @tf.function
-def set_max_magnitude(arr, max_magnitude = None):
+def set_max_magnitude(arr, max_magnitude = None, return_scaling_factors = False):
     '''
     Helper method to set the max magnitude in an array
     '''
@@ -45,17 +45,26 @@ def set_max_magnitude(arr, max_magnitude = None):
         arr = arr[0]
         
     scaling_factor = max_magnitude/tf.reduce_max(tf.abs(arr))
-    return arr * scaling_factor
+    if return_scaling_factors:
+        return arr * scaling_factor, scaling_factor
+    else:
+        return arr * scaling_factor
     
 @tf.function
-def set_max_magnitude_in_batch(arr, max_magnitude):
+def set_max_magnitude_in_batch(arr, max_magnitude, return_scaling_factors = False):
     '''
     Set max magnitudes within each batch in parallel
     '''
     if isinstance(max_magnitude, float):
-        max_magnitude = tf.cast(tf.constant([max_magnitude for k in range(arr.shape[0])]), arr.dtype)
+        #max_magnitude = tf.cast(tf.constant([max_magnitude for k in range(arr.shape[0])]), arr.dtype)
+        max_magnitude = tf.cast(tf.keras.backend.tile(tf.constant([max_magnitude]), [tf.shape(arr)[0]]), arr.dtype)
+
+    if return_scaling_factors:
+        return_dtype = (arr.dtype, arr.dtype)
+    else:
+        return_dtype = arr.dtype
     
-    return tf.map_fn(set_max_magnitude, (arr, max_magnitude), dtype = arr.dtype, parallel_iterations = multiprocessing.cpu_count())
+    return tf.map_fn(lambda x: set_max_magnitude(x, return_scaling_factors = return_scaling_factors), (arr, max_magnitude), dtype = return_dtype, parallel_iterations = multiprocessing.cpu_count())
 
 def generate_random_RHS(batch_size, n_outputpts, smoothness = None, resize_method = tf.image.ResizeMethod.BICUBIC, max_magnitude = np.inf):
     
