@@ -110,12 +110,12 @@ def poisson_RHS(F, boundaries = None, h = None, rho = None):
             left = left/rho[i,...,1,1:-1]
             right = right/rho[i,...,-2,1:-1]
         
-        F[i,...,1:-1,1] += top
-        F[i,...,1:-1,-2] += bottom
+        F[i,...,1:-1,1] += bottom
+        F[i,...,1:-1,-2] += top
         F[i,...,1,1:-1] += left
         F[i,...,-2,1:-1] += right
 
-    return F[...,1:-1,1:-1].reshape(list(F[...,1:-1,1:-1].shape[:-2]) + [np.prod(F[...,1:-1,1:-1].shape[-2:])], order = 'F') #Fortran reshape order important to preserve structure!
+    return F[...,1:-1,1:-1].reshape(list(F[...,1:-1,1:-1].shape[:-2]) + [np.prod(F[...,1:-1,1:-1].shape[-2:])], order = 'C') #Fortran reshape order important to preserve structure!
  
 
 def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_matrix_is_decomposed = False):
@@ -174,11 +174,11 @@ def cholesky_poisson_solve(rhses, boundaries, h, system_matrix = None, system_ma
     
     #solve and reshape
     z = tf.reshape(chol_solve(rhs_vectors), list(rhses.shape[:-2]) + [int(rhses.shape[-1])-2, int(rhses.shape[-2])-2])
-    z = tf.transpose(z, list(range(len(z.shape[:-2]))) + [len(z.shape)-1, len(z.shape)-2])
+    #z = tf.transpose(z, list(range(len(z.shape[:-2]))) + [len(z.shape)-1, len(z.shape)-2])
     
     soln = np.zeros(rhses.shape, dtype = np.float64)
-    soln[...,:,0] = boundaries['top']
-    soln[...,:,-1] = boundaries['bottom']
+    soln[...,:,-1] = boundaries['top']
+    soln[...,:,0] = boundaries['bottom']
     soln[...,0,:] = boundaries['left']
     soln[...,-1,:] = boundaries['right']
     soln[...,1:-1,1:-1] = z
