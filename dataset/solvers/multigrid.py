@@ -80,7 +80,7 @@ def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = No
     if rhses.shape[1] == 1:
         rhses = np.squeeze(rhses, axis = 1)
     
-    solns = np.zeros([rhses.shape[0]] + [dim for dim in rhses.shape[1:]])
+    solns = np.zeros([rhses.shape[0], 1] + [dim for dim in rhses.shape[1:]])
     rhs_vectors = poisson_RHS(rhses, boundaries, h = dx)
 
     if system_matrix == None:
@@ -98,5 +98,5 @@ def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = No
     solns[...,0,:] = boundaries['left']
     solns[...,-1,:] = boundaries['right']
 
-    return np.expand_dims(solns, axis = 1)
+    return solns
     
