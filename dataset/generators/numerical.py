@@ -168,7 +168,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     if dx == 'random':
         dx = tf.random.uniform((batch_size,1))*(random_dx_range[1] - random_dx_range[0]) + random_dx_range[0]
     elif isinstance(dx, float):
-        dx = np.ones((batch_size))*dx
+        dx = np.ones((batch_size,1))*dx
     
     if not callable(solver_method):
         if solver_method == 'cholesky':

@@ -147,6 +147,7 @@ class Dirichlet_BC_NN(Model_With_Integral_Loss_ABC):
 
        out = self.conv_last(out)
        out = self.resnet_last(out)
+       
        return out
 
     def __call__(self, inp, training = True):#overload __call__ to allow freezing batch norm parameters

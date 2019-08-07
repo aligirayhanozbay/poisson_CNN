@@ -19,20 +19,20 @@ class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
         try: #try except block to handle keras model init shenanigans
             if self.data_format == 'channels_first':
                 c = 0.5* tf.concat([self.dx * (int(y_true.shape[-2])-1), self.dx * (int(y_true.shape[-1])-1)],1)
-                coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-2]),np.linspace(-1, 1, y_true.shape[-1]),indexing = 'xy'), dtype = tf.keras.backend.floatx()).transpose((1,2,0)) #coordinates of each grid pt in the domain
+                coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-2]),np.linspace(-1, 1, y_true.shape[-1]),indexing = 'ij'), dtype = tf.keras.backend.floatx()).transpose((1,2,0)) #coordinates of each grid pt in the domain
             else:
                 c = 0.5 * tf.concat([self.dx * int(y_true.shape[-3]), self.dx * int(y_true.shape[-2])],1)
-                coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-3]),np.linspace(-1, 1, y_true.shape[-2]),indexing = 'xy'), dtype = tf.keras.backend.floatx()).transpose((1,2,0)) #coordinates of each grid pt in the domain
+                coords = np.array(np.meshgrid(np.linspace(-1, 1, y_true.shape[-3]),np.linspace(-1, 1, y_true.shape[-2]),indexing = 'ij'), dtype = tf.keras.backend.floatx()).transpose((1,2,0)) #coordinates of each grid pt in the domain
         except:
             return 0.0*(y_true - y_pred)
-        image_coords = [coords[0,:,0], coords[:,1,1]] #x and y coordinates separately
+        image_coords = [coords[:,0,0], coords[1,:,1]] #x and y coordinates separately
         quadrature_x, quadrature_w = tuple([x.astype(tf.keras.backend.floatx()) for x in np.polynomial.legendre.leggauss(self.n_quadpts)])
         #quadrature_x, quadrature_w = tuple([np.polynomial.legendre.leggauss(self.n_quadpts)[i].astype(np.float64) for i in range(2)])
 
-        quadpts = tf.constant(np.array(np.meshgrid(quadrature_x,quadrature_x,indexing = 'xy')).transpose((1,2,0)),dtype = tf.keras.backend.floatx())
+        quadpts = tf.constant(np.array(np.meshgrid(quadrature_x,quadrature_x,indexing = 'ij')).transpose((1,2,0)),dtype = tf.keras.backend.floatx())
         #quadweights = tf.reduce_prod(c)*tf.tensordot(tf.squeeze(quadrature_w),tf.squeeze(quadrature_w),axes = 0)
         indices = [[],[]] #indices between each quadrature point lies - indices[0] is in x-dir and indices[1] is in the y-dir
-        quad_coords = [quadpts[0,:,0], quadpts[:,1,1]] #x and y coordinates of each quad pt respectively
+        quad_coords = [quadpts[:,0,0], quadpts[1,:,1]] #x and y coordinates of each quad pt respectively
         #find the indices of coords between which every quad. pt. lies
         for i in range(len(indices)):
             j=0
@@ -52,6 +52,7 @@ class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
         index_combinations = tf.Variable(tf.zeros((quadpts.shape[0], quadpts.shape[1], 4 , 2), dtype = tf.int32), trainable = False, dtype = tf.int32) #array storing the 4 index combinations on the original grid which surround each quad. pt.
         corners = tf.Variable(tf.zeros((quadpts.shape[0], quadpts.shape[1], 2 , 2), dtype = np.int32), dtype = tf.int32, trainable = False) #array storing the lower left corner and the upper right corner of each box stored in index_combinations. effectively this will contain [[xmin,ymin],[xmax,ymax]] for the rectangle around each quad pt.
         s=tf.constant(indices)
+
         for i in range(self.n_quadpts):
             for j in range(self.n_quadpts):
                 index_combinations[i,j,:,:].assign(np.array(list(itertools.product(np.array(s)[0,i,:],np.array(s)[1,j,:]))))
@@ -59,7 +60,7 @@ class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
             for j in range(self.n_quadpts):
                 corners[i,j,:,:].assign(tf.stack([s[0,i,:],s[1,j,:]]))
         corners = tf.transpose(corners,(0,1,3,2))
-        corner_coords = tf.gather_nd(tf.transpose(coords,(1,0,2)),corners)
+        corner_coords = tf.gather_nd(tf.transpose(coords,(0,1,2)),corners)
         
         #compute the coefficients [b_11,b_12,b_21,b_22]
         #steps:
@@ -79,18 +80,18 @@ class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
         q[:,:,3].assign(tf.multiply(q[:,:,1],q[:,:,2]))
         
         b = oe.contract('ijkl, ijl->ijk', interpolation_matrix, q, backend = 'tensorflow')
-        
+
         quadweights = oe.contract('i,j,k->ijk',tf.squeeze(quadrature_w),tf.squeeze(quadrature_w), tf.reduce_prod(c,axis = 1), backend = 'tensorflow')
         if self.data_format == 'channels_first':
             interp_pts = tf.squeeze(tf.gather_nd(tf.transpose(y_true - y_pred, (2,3,1,0)), index_combinations), axis = 3)
         else:
             interp_pts = tf.squeeze(tf.gather_nd(tf.transpose(y_true - y_pred, (1,2,3,0)), index_combinations), axis = 3)
-
+        
         values_at_quad_pts = oe.contract('ijkl, ijk->ijl', interp_pts, b, backend = 'tensorflow')
-    
+
         inverse_domain_area = 1/tf.reduce_prod(2*c, axis = 1)
-        #loss = tf.reduce_mean(tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1))**(1/self.p))
-        loss = tf.reduce_mean(oe.contract('i,i...->i...',inverse_domain_area,tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1)))**(1/self.p))
+    
+        loss = tf.reduce_mean(oe.contract('i,i...->i...',inverse_domain_area,tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1)), backend = 'tensorflow')**(1/self.p))
         
         if self.mae_component_weight != 0.0:
             loss = loss + self.mae_component_weight * tf.reduce_mean(tf.keras.losses.mean_absolute_error(y_true, y_pred))

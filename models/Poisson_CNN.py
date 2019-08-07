@@ -129,9 +129,6 @@ class Poisson_CNN(Model_With_Integral_Loss_ABC):
         for layer in self.hpnn.layers:
             layer.trainable = homogeneous_poisson_nn_trainable
         
-        # self.post_merge_convolution_0 = tf.keras.layers.Conv2D(filters = 16, kernel_size = 9, activation = tf.nn.leaky_relu, data_format = self.data_format, padding = 'same')
-        # self.post_merge_convolution_1 = tf.keras.layers.Conv2D(filters = 8, kernel_size = 5, activation = tf.nn.leaky_relu, data_format = self.data_format, padding = 'same')
-        # self.post_merge_convolution_2 = tf.keras.layers.Conv2D(filters = 1, kernel_size = 3, activation = 'linear', data_format = self.data_format, padding = 'same')
         
     def call(self, inp):# rhs, boundaries, dx):
         '''
@@ -164,11 +161,11 @@ class Poisson_CNN(Model_With_Integral_Loss_ABC):
             right_boundary = self.flipud_method(self.rotation_method(tmp[rhs.shape[0]:,0,...], k = 2)) #rotate and reflect right boundary method
 
             self.bc_nn.x_output_resolution = rhs.shape[3]#predict for top and bottom BCs by supplying them to Dirichlet_BC_NN as a single batch
-            tmp = self.bc_nn([tf.concat([top_boundary, bottom_boundary], axis = 0), tf.tile(self.dx, [2,1])])
-            top_boundary = self.fliplr_method(self.rotation_method(tmp[0:rhs.shape[0],0,...], k = 1)) #rotate and reflect top boundary prediction
-            bottom_boundary = self.rotation_method(tmp[rhs.shape[0]:,0,...], k = 3) #rotate bottom boundary prediction
+            tmp = self.bc_nn([tf.concat([bottom_boundary, top_boundary], axis = 0), tf.tile(self.dx, [2,1])])
+            bottom_boundary = self.fliplr_method(self.rotation_method(tmp[0:rhs.shape[0],0,...], k = 1)) #rotate and reflect top boundary prediction
+            top_boundary = self.rotation_method(tmp[rhs.shape[0]:,0,...], k = 3) #rotate bottom boundary prediction
 
-            rhs = tf.squeeze(self.hpnn([rhs, self.dx])) #predict for the homogeneous Poisson problem
+            rhs = tf.squeeze(self.hpnn([rhs, self.dx]), axis = self.stacking_dim) #predict for the homogeneous Poisson problem
 
             solutions = tf.stack([left_boundary, right_boundary, top_boundary, bottom_boundary, rhs], axis = 1) 
             solutions = tf.einsum('ij...,ij->ij...', solutions, 1/scaling_factors) #revert each prediction to original scale
@@ -188,5 +185,5 @@ class Poisson_CNN(Model_With_Integral_Loss_ABC):
 
             solutions = tf.stack([left_boundary, right_boundary, top_boundary, bottom_boundary, rhs], axis = -1)
             solutions = tf.einsum('i...j,ij->i...j', solutions, 1/scaling_factors)
-
+        
         return tf.reduce_sum(solutions, axis = self.stacking_dim, keepdims = True)
