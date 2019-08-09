@@ -130,7 +130,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
                 boundaries[boundary] = tf.expand_dims(boundaries[boundary], axis = 2)
     return boundaries
 
-def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]], random_dx_range = [0.005,0.05]):
+def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]], random_dx_range = [0.005,0.05], normalize_by_domain_size = False):
     '''
     Generates Poisson equation RHS-solution pairs with 'random' RHS functions.
 
@@ -148,6 +148,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     return_boundaries: If set to True, the BCs will be appended to the output
     return_dx: If set to True, the grid spacing(s) will be appended to the output
     random_output_shape_range: List of lists, where each list contains [n_min, n_max] along the corresponding dim
+    normalize_by_domain_size: If set to True, the solution (and ONLY the solution) will be divided by the product of the domain lengths
 
     Outputs a tf.Tensor of shape (batch_size * smoothness_levels, n[0], n[1])
     '''
@@ -178,7 +179,12 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
         else:
             raise(ValueError('solver_method must be a function or one of cholesky or multigrid'))
 
-    out = solver_method(rhses, boundaries,dx)
+    out = tf.constant(solver_method(rhses, boundaries,dx))
+
+    if normalize_by_domain_size:
+        domainsize = tf.squeeze(dx**len(output_shape)) * np.prod(np.array(output_shape)-1)
+        out = tf.einsum('i...,i->i...', out, tf.cast(1/domainsize, out.dtype))
+    
     inp = []
     if return_rhs:
         inp.append(rhses)
@@ -190,9 +196,9 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
         inp.append(tf.cast(tf.constant(rhses.shape), tf.int32))
     
     if len(inp) > 0:
-        return inp, tf.constant(out)
+        return inp, out
     else:
-        return tf.constant(out)
+        return out
 
 class numerical_dataset_generator(tf.keras.utils.Sequence):
     def __init__(self, batch_size = 1, batches_per_epoch = 1, randomize_rhs_smoothness = False, rhs_random_smoothness_range = [5,20], randomize_boundary_smoothness = False, boundary_random_smoothness_range = {'left':[5,20], 'top':[5,20], 'right':[5,20], 'bottom': [5,20]}, randomize_rhs_max_magnitude = False, rhs_random_max_magnitude = 1.0, randomize_boundary_max_magnitudes = False, boundary_random_max_magnitudes = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, return_keras_style = True, exclude_zero_boundaries = False, **numerical_dataset_arguments):
