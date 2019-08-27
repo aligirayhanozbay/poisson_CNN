@@ -183,7 +183,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
 
     if normalize_by_domain_size:
         domainsize = tf.squeeze(dx**len(output_shape)) * np.prod(np.array(output_shape)-1)
-        out = tf.einsum('i...,i->i...', out, tf.cast(1/domainsize, out.dtype))
+        out = 10*tf.einsum('i...,i->i...', out, tf.cast(1/domainsize, out.dtype))
     
     inp = []
     if return_rhs:

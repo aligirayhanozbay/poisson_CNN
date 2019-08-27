@@ -90,7 +90,8 @@ class Model_With_Integral_Loss_ABC(ABC, tf.keras.models.Model):
         values_at_quad_pts = oe.contract('ijkl, ijk->ijl', interp_pts, b, backend = 'tensorflow')
 
         inverse_domain_area = 1/tf.reduce_prod(2*c, axis = 1)
-    
+
+        #loss = tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1))**(1/self.p)
         loss = tf.reduce_mean(oe.contract('i,i...->i...',inverse_domain_area,tf.reduce_sum(tf.multiply(quadweights, values_at_quad_pts**self.p), axis = (0,1)), backend = 'tensorflow')**(1/self.p))
         
         if self.mae_component_weight != 0.0:
