@@ -390,7 +390,7 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
         self.merge_final = MergeWithAttention()
         self.conv_last = tf.keras.layers.Conv2D(filters = 1, kernel_size = final_kernel_size, activation='linear', data_format=data_format, padding='same', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
         self.resnet_last = ResnetBlock(filters = 1, kernel_size = final_kernel_size, activation='linear', data_format=data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
-        #self.output_denoiser = AveragePoolingBlock(pool_size = 3, data_format=data_format, use_resnetblocks = True, use_deconvupsample = True, kernel_size = final_kernel_size, filters = 1, activation = 'linear', )
+        self.output_denoiser = AveragePoolingBlock(pool_size = 3, data_format=data_format, use_resnetblocks = True, use_deconv_upsample = False, kernel_size = final_kernel_size, filters = 1, activation = 'linear', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
         
         self.dx_dense_0 = tf.keras.layers.Dense(100, activation = tf.nn.leaky_relu)
         self.dx_dense_1 = tf.keras.layers.Dense(100, activation = tf.nn.leaky_relu)
@@ -447,7 +447,7 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
         out = self.merge_final([out]+rpcb_res)
         out = self.resnet_last(self.conv_last(out))
         #out += sum(rpcb_res)
-        
+        out = self.output_denoiser(out)
             
         if self.use_scaling:
             out = self.scaling([out, inp[0]])
