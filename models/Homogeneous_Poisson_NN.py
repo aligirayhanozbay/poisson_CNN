@@ -335,7 +335,7 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
         else:
             self.resize_methods = resize_methods
 
-        self.pooling_block_filters = 32
+        self.pooling_block_filters = 24
         
         self.conv_1 = tf.keras.layers.Conv2D(filters = 8, kernel_size = initial_kernel_size, activation=tf.nn.leaky_relu, data_format=data_format, padding='same', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
         #self.batchnorm_1 = tf.keras.layers.BatchNormalization(axis = 1)
@@ -366,7 +366,7 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
             self.post_dx_einsum_conv_blocks.append(block)
 
         self.residual_pooling_connection_blocks = []
-        for k in range(2):
+        for k in range(3):
             block = []
             block.append(tf.keras.layers.Conv2D(filters = filters, kernel_size = final_kernel_size, activation = tf.nn.leaky_relu, data_format = data_format, padding = 'same', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer))
             block.append(ResnetBlock(filters = filters, kernel_size = final_kernel_size, activation = tf.nn.leaky_relu, data_format = data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer))
@@ -388,17 +388,22 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
         self.resnet_penultimate = ResnetBlock(filters = filters, kernel_size = final_kernel_size, activation=tf.nn.leaky_relu, data_format=data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
 
         self.merge_final = MergeWithAttention()
-        self.conv_last = tf.keras.layers.Conv2D(filters = 1, kernel_size = final_kernel_size, activation='linear', data_format=data_format, padding='same', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
-        self.resnet_last = ResnetBlock(filters = 1, kernel_size = final_kernel_size, activation='linear', data_format=data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
-        self.output_denoiser = AveragePoolingBlock(pool_size = 3, data_format=data_format, use_resnetblocks = True, use_deconv_upsample = False, kernel_size = final_kernel_size, filters = 1, activation = 'linear', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
+        self.conv_last = tf.keras.layers.Conv2D(filters = 1, kernel_size = final_kernel_size, activation=tf.nn.tanh, data_format=data_format, padding='same', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
+        self.resnet_last = ResnetBlock(filters = 1, kernel_size = final_kernel_size, activation=tf.nn.tanh, data_format=data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
+        self.output_denoiser = AveragePoolingBlock(pool_size = 4, data_format=data_format, use_resnetblocks = True, use_deconv_upsample = False, kernel_size = final_kernel_size, filters = 1, activation=tf.nn.tanh, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer) #13.09 set activations to tanh
         
         self.dx_dense_0 = tf.keras.layers.Dense(100, activation = tf.nn.leaky_relu)
         self.dx_dense_1 = tf.keras.layers.Dense(100, activation = tf.nn.leaky_relu)
         self.dx_dense_2 = tf.keras.layers.Dense(final_dense_layer_units, activation = 'linear', kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
 
+
         self.use_scaling = use_scaling
         if use_scaling:
-            self.scaling = Scaling(data_format = self.data_format, kernel_size = final_kernel_size, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer, **scaling_args)
+            #self.scaling = Scaling(data_format = self.data_format, kernel_size = final_kernel_size, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer, **scaling_args)
+
+            self.dx_dense_scaler_0 = tf.keras.layers.Dense(30, activation = tf.nn.leaky_relu)
+            self.dx_dense_scaler_1 = tf.keras.layers.Dense(30, activation = tf.nn.leaky_relu)
+            self.dx_dense_scaler_2 = tf.keras.layers.Dense(1, activation = 'linear')
         
     def call(self, inp):
         '''
@@ -424,8 +429,10 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
 
         out = self.dx_einsum_conv(out)
         out = self.dx_einsum_resnet(out)
+
+        dx_res = self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(domain_info)))
         
-        out = tf.einsum('ijkl, ij -> ijkl',out, self.dx_dense_2(self.dx_dense_1(self.dx_dense_0(domain_info)))) #incorporate domain info
+        out = tf.einsum('ijkl, ij -> ijkl',out, dx_res) #incorporate domain info
 
         for block_num, block in enumerate(self.post_dx_einsum_conv_blocks): #perform additional convolutions
             for layer in block:
@@ -450,12 +457,17 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
         out = self.output_denoiser(out)
             
         if self.use_scaling:
-            out = self.scaling([out, inp[0]])
+            #out = self.scaling([out, inp[0], dx_res])
+            try:
+                scale = self.dx_dense_scaler_2(self.dx_dense_scaler_1(self.dx_dense_scaler_0(domain_info)))
+                out = tf.einsum('i,i...->i...',tf.squeeze(scale),out)
+            except:
+                pass
 
         if self.training == False:
             out = tf.einsum('i...,i->i...', out, tf.reduce_prod(domain_info[:,1:], axis = 1))
-            
-        return out
+        
+        return smmib(out, 1.0)#13.09 added smmib
 
     def __call__(self, inp, training = True):#overload __call__ to allow freezing batch norm parameters
         self.training = training
