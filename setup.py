@@ -11,7 +11,7 @@ setuptools.setup(
     description="A convolutional neural network based Poisson solver",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="github.com/aligirayhanozbay/poisson_CNN",
+    url="https://github.com/aligirayhanozbay/poisson_CNN",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
