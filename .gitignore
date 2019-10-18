@@ -1,5 +1,5 @@
 *.py~
 Untitled*
-__pycache__/
+poisson_CNN/__pycache__/
 .ipynb_checkpoints/
-weights/
+poisson_CNN/weights/
