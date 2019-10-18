@@ -1,8 +1,5 @@
 import numpy as np
-try:
-    import tensorflow.compat.v1 as tf
-except:
-    import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from collections.abc import Iterable
 
 class Upsample(tf.keras.layers.Layer):

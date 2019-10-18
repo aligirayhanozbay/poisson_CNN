@@ -83,8 +83,9 @@ class Dirichlet_BC_NN(Model_With_Integral_Loss_ABC):
                 else:
                     self.batchnorm_layers.append(tf.keras.layers.BatchNormalization(axis = -1))
         
-        self.conv_last = tf.keras.layers.Conv2D(filters = 1, kernel_size = final_kernel_size, activation = 'linear', padding = 'same', data_format = data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer) #final convolutions before output
-        self.resnet_last = ResnetBlock(filters = 1, kernel_size = final_kernel_size, activation = 'linear', data_format = data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
+        self.conv_last = tf.keras.layers.Conv2D(filters = 1, kernel_size = final_kernel_size, activation = tf.nn.tanh, padding = 'same', data_format = data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer) #final convolutions before output
+        self.resnet_last = ResnetBlock(filters = 1, kernel_size = final_kernel_size, activation = tf.nn.tanh, data_format = data_format, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer)
+        #self.output_denoiser = AveragePoolingBlock(pool_size = 4, data_format=data_format, use_resnetblocks = True, use_deconv_upsample = False, kernel_size = final_kernel_size, filters = 1, activation=tf.nn.tanh, kernel_regularizer = kernel_regularizer, bias_regularizer = bias_regularizer) #13.09 set activations to tanh
 
     def call(self, inp):
        '''
@@ -147,6 +148,18 @@ class Dirichlet_BC_NN(Model_With_Integral_Loss_ABC):
 
        out = self.conv_last(out)
        out = self.resnet_last(out)
+       
+
+       if not self.training:
+           out = tf.Variable(lambda: out)
+           if self.data_format == 'channels_first':
+               out[...,0,:].assign(inp[0])
+           else:
+               out[:,0,...].assign(inp[0])
+       #try:
+       #    out = self.output_denoiser(out)
+       #except:
+       #    print('asd')
        
        return out
 

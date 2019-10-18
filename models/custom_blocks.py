@@ -16,10 +16,19 @@ class SepConvBlock(tf.keras.models.Model):
         return self.conv2d(self.separableconv2d(inp))
     
 class ResnetBlock(tf.keras.models.Model):
-    def __init__(self, data_format = 'channels_first', **conv_layer_args):
+    def __init__(self, ndims = 2, data_format = 'channels_first', **conv_layer_args):
         super().__init__()
-        self.conv0 = tf.keras.layers.Conv2D(padding = 'same', data_format = data_format, **conv_layer_args)
-        self.conv1 = tf.keras.layers.Conv2D(padding = 'same', data_format = data_format, **conv_layer_args)
+        if int(ndims) == 1:
+            self.conv0 = tf.keras.layers.Conv1D(padding = 'same', data_format = data_format, **conv_layer_args)
+            self.conv1 = tf.keras.layers.Conv1D(padding = 'same', data_format = data_format, **conv_layer_args)
+        elif int(ndims) == 2:
+            self.conv0 = tf.keras.layers.Conv2D(padding = 'same', data_format = data_format, **conv_layer_args)
+            self.conv1 = tf.keras.layers.Conv2D(padding = 'same', data_format = data_format, **conv_layer_args)
+        elif int(ndims) == 3:
+            self.conv0 = tf.keras.layers.Conv3D(padding = 'same', data_format = data_format, **conv_layer_args)
+            self.conv1 = tf.keras.layers.Conv3D(padding = 'same', data_format = data_format, **conv_layer_args)
+        else:
+            raise ValueError('ndims must be 1,2 or 3')
 
     def call(self, inp):
         return inp + self.conv0(self.conv1(inp))
@@ -98,20 +107,23 @@ class Scaling(tf.keras.models.Model):
 
     def call(self, inp):
         #input format: tf.Tensor of shape [batch_size, 2, nx, ny] where [:,0,...] is the input to conditionally scale, or a list of 2 tf.Tensors such that [input_to_scale, 2nd input]
-        if self.data_format == 'channels_first' and isinstance(inp, list):
-            inp = tf.concat(inp, axis = 1)
-            inp_to_scale = tf.expand_dims(inp[:,0,...], axis = 1)
+        if self.data_format == 'channels_first' and len(inp) == 3:
+            conv_data = tf.concat(inp[:2], axis = 1)
+            inp_to_scale = tf.expand_dims(conv_data[:,0,...], axis = 1)
         elif self.data_format == 'channels_first':
-            inp_to_scale = tf.expand_dims(inp[:,0,...], axis = 1)
-        elif isinstance(inp,list):
-            inp = tf.concat(inp, axis = -1)
-            inp_to_scale = tf.expand_dims(inp[:,...,0], axis = -1)
+            conv_data = inp[0]
+            inp_to_scale = tf.expand_dims(inp[0][:,0,...], axis = 1)
+        elif len(inp) == 3:
+            conv_data = tf.concat(inp[:2], axis = -1)
+            inp_to_scale = tf.expand_dims(conv_data[:,...,0], axis = -1)
         else:
+            conv_data = inp[0]
             inp_to_scale = tf.expand_dims(inp[:,...,0], axis = -1)
-        out = self.stages[0](inp)
+        out = self.stages[0](conv_data)
         for k in range(1, len(self.stages)):
             out = self.stages[k](out)
         out = self.spp(out)
+        #out = tf.concat([out, inp[1]], axis = 1)
         out = self.dense_2(self.dense_1(self.dense_0(out)))
         return tf.einsum('i...,i...->i...', 1.0+out, inp_to_scale)
         

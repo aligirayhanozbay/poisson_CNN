@@ -299,7 +299,7 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
     '''
     Takes a tf.Tensor containing the RHS and grid spacing information, and gives the corresponding solution to the Poisson problem with homogeneous BCs.
     '''
-    def __init__(self, pooling_block_number = 6, post_dx_einsum_conv_block_number = 5, initial_kernel_size = 19, final_kernel_size = 3, resize_methods = None, data_format = 'channels_first', use_batchnorm = False, use_deconv_upsample = False, kernel_regularizer = None, bias_regularizer = None, use_scaling = True, scaling_args = {'downsampling_ratio_per_stage': 3, 'stages': 3, 'filters': 4, 'activation': tf.nn.leaky_relu, 'spp_levels': [[2,2],3,5]}, **kwargs):
+    def __init__(self, pooling_block_number = 6, post_dx_einsum_conv_block_number = 5, initial_kernel_size = 19, final_kernel_size = 3, resize_methods = None, data_format = 'channels_first', use_batchnorm = False, use_deconv_upsample = False, kernel_regularizer = None, bias_regularizer = None, use_scaling = True, output_max_magnitude = 1.0, scaling_args = {'downsampling_ratio_per_stage': 3, 'stages': 3, 'filters': 4, 'activation': tf.nn.leaky_relu, 'spp_levels': [[2,2],3,5]}, **kwargs):
         '''
         Init arguments:
 
@@ -324,6 +324,7 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
         self.pooling_block_kernel_sizes[-2:] = 3
         self.pooling_block_kernel_sizes = list(self.pooling_block_kernel_sizes)
         self.use_batchnorm = use_batchnorm
+        self.output_max_magnitude = output_max_magnitude
 
         final_dense_layer_units = 32
         
@@ -466,8 +467,11 @@ class Homogeneous_Poisson_NN_Fluidnet_Test(Model_With_Integral_Loss_ABC):
 
         if self.training == False:
             out = tf.einsum('i...,i->i...', out, tf.reduce_prod(domain_info[:,1:], axis = 1))
-        
-        return smmib(out, 1.0)#13.09 added smmib
+
+        if self.output_max_magnitude is not None:
+            out = smmib(out, 1.0)#13.09 added smmib
+
+        return out
 
     def __call__(self, inp, training = True):#overload __call__ to allow freezing batch norm parameters
         self.training = training

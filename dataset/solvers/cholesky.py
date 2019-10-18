@@ -65,6 +65,7 @@ def poisson_RHS(F, boundaries = None, h = None, rho = None):
         F = F[0]
     
     boundaries = copy.deepcopy(boundaries)
+    F = copy.deepcopy(F)
     
     for key in boundaries.keys():
         if len(boundaries[key].shape) > 1:

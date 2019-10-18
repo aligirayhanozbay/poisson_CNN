@@ -74,9 +74,9 @@ class SpatialPyramidPool(tf.keras.layers.Layer):
         except:
             print('spp init')
             if data_format[1] == 'C':
-                out = tf.reduce_max(inp, axis = [2,3])
+                out = tf.reduce_max(inp, axis = [k for k in range(2,2+ndims)])
             else:
-                out = tf.reduce_max(inp, axis = [1,2])
+                out = tf.reduce_max(inp, axis = [k for k in range(1,1+ndims)])
             levels = tf.constant(levels)
             out = tf.tile(out, [1,tf.reduce_sum(tf.reduce_prod(levels, axis = 1))])
         return out

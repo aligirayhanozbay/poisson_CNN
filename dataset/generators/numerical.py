@@ -114,7 +114,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
     elif smoothness == None:
         smoothness = {'left' : np.random.randint(5,int(n_outputpts[1]//1.5)), 'right' : np.random.randint(5,int(n_outputpts[1]//1.5)), 'top' : np.random.randint(5,int(n_outputpts[0]//1.5)), 'bottom' : np.random.randint(5,int(n_outputpts[0]//1.5))}
     boundaries = {}
-    for boundary in smoothness.keys():
+    for boundary in boundary_lengths.keys():
         if boundary in nonzero_boundaries:
             boundaries[boundary] = image_resize(2*tf.random.uniform((batch_size,smoothness[boundary]), dtype = tf.keras.backend.floatx())-1, [batch_size, boundary_lengths[boundary]])
 
