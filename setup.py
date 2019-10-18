@@ -23,6 +23,7 @@ setuptools.setup(
         "numpy",
         "opt-einsum",
         "tensorflow-gpu>=2.0.0",
+        "pyamg"
     ],
     python_requires='>=3.6',
 )
