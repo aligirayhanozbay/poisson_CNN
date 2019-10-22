@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="poisson_CNN",
-    version="0.1.0",
+    version="0.2.1",
     author="Ali Girayhan Ozbay",
     author_email="aligirayhan.ozbay14@imperial.ac.uk",
     description="A convolutional neural network based Poisson solver",
