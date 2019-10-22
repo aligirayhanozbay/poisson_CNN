@@ -3,3 +3,6 @@ Untitled*
 __pycache__/
 .ipynb_checkpoints/
 weights/
+build/
+dist/
+poisson_CNN.egg-info/
