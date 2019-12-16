@@ -1,32 +1,7 @@
 import tensorflow as tf
 from collections.abc import Iterable
 
-def _place_finite_difference_coefficients():
-    return
-
-def _variablemesh_compute_finite_difference_coefficients(domain_shape, spacings = None, domain_includes_edges = True):
-
-    ndims = len(domain_shape)
-
-    domain_shape = tf.cast(domain_shape,tf.int32)
-    if not domain_includes_edges:
-        domain_shape = domain_shape+2
-    
-    if spacings is None:
-        spacings = [tf.ones((domain_shape[dim]-1,), dtype = tf.keras.backend.floatx()) for dim in range(ndims)]
-    elif isinstance(spacings, float):
-        spacings = [spacings*tf.ones((domain_shape[dim]-1,), dtype = tf.keras.backend.floatx()) for dim in range(ndims)]
-    elif isinstance(spacings, Iterable) and isinstance(spacings[0],float):
-        spacings = [spacings[dim]*tf.ones((domain_shape[dim]-1,), dtype = tf.keras.backend.floatx()) for dim in range(ndims)]
-        
-    variable_spacing_coefficients = []
-    for k in range(ndims):
-        spacing = tf.cast(spacings[k],tf.keras.backend.floatx())
-        variable_spacing_coefficients.append(2/(spacing[1:]*spacing[:-1]*(spacing[1:]+spacing[:-1])))
-        
-    return variable_spacing_coefficients
-
-def _finitedifference_poisson_matrix(domain_shape, spacings = None, domain_includes_edges = True):
+def poisson_lhs_matrix(domain_shape, spacings = None, domain_includes_edges = True):
 
     ndims = len(domain_shape)
 
@@ -75,31 +50,6 @@ def _finitedifference_poisson_matrix(domain_shape, spacings = None, domain_inclu
         return coeffs
     else:
         return coeffs[tuple([Ellipsis] + [slice(1,domain_shape[k]-1) for k in range(ndims)])]
-
-def _stretchingfuction_compute_finite_difference_coefficients():
-    return
-    
-def poisson_lhs_matrix(domain_shape, spacings_or_stretching_function = None, domain_includes_edges = True):
-
-    if not callable(spacings_or_stretching_function):#if spacings_or_stretching_function is not a stretching function, treat as though a regular finite difference problem
-        return _finitedifference_poisson_matrix(domain_shape, spacings_or_stretching_function, domain_includes_edges)
-
-    ndims = len(domain_shape)
-    h = spacings_or_stretching_function
-    s=[tf.linspace(0.0,1.0,domain_shape[k]) for k in range(ndims)]
-    y=[]
-    grads_1 = []
-    grads_2 = []
-    for k in range(ndims):
-        with tf.GradientTape() as tape_d2:
-            tape_d2.watch(s[k])
-            with tf.GradientTape() as tape_d1:
-                tape_d1.watch(s[k])
-                y.append(h(s[k]))
-            grads_1.append(tape_d1.gradient(y[k],s[k]))
-        grads_2.append(tape_d2.gradient(grads_1[k],s[k]))
-    print(grads_2)
-    return
     
 if __name__ == '__main__':
     import numpy as np
@@ -124,45 +74,36 @@ if __name__ == '__main__':
         errors.append(tf.reduce_sum(tf.cast(tf.math.logical_not(tf.reshape(pm[dim],[-1]) == -pm_pyamg[dim]),tf.int32)))
     print('Total errors in pyamg comparison test (should be 0): ' + str(int(sum(errors))))
     
-    ##unit test 3: 2nd derivative on differently spaced mesh. numerics mean that with a chebyshev pt distribution the error increases as no of pts increase!
+    ##unit test 3: 2nd derivative
     import scipy
     print('---Unit test 3: Compute 2nd derivate of x^2-2x+1 in the interval [0,2] sampled on 50 Chebyshev points---')
-    npts = 100
+    npts = 50
     domain_shape = [npts-2]
     x,w = np.polynomial.chebyshev.chebgauss(npts)
     x = x+1
     y = x**2-2*x+1
-    pm = scipy.sparse.dia_matrix((poisson_lhs_matrix(domain_shape, [x[1:]-x[:-1]], domain_includes_edges = False),[-1,0,1]),shape=(npts-2,npts-2)).toarray()
+    pm = scipy.sparse.dia_matrix((poisson_lhs_matrix(domain_shape,spacings = [x[1:]-x[:-1]], domain_includes_edges = False),[-1,0,1]),shape=(npts-2,npts-2)).toarray()
     grads = np.einsum('ij,j->i',pm,y[1:-1])
     grads[0] = grads[0]+y[0]*2/((x[1]-x[0])*(x[2]-x[0]))#adjust edge values in gradient computation
     grads[-1] = grads[-1]+y[-1]*2/((x[-1]-x[-2])*(x[-1]-x[-3]))
     print(grads-2)
     print('RMS error (reference value=2): ' + str(float(tf.reduce_mean((grads-2)**2)**0.5)))
     print('RMS error on inner pts (reference value=2): ' + str(float(tf.reduce_mean((grads[1:-1]-2)**2)**0.5)))
-    print('Maximal adjacent spacing discrepancy :' + str(float(tf.reduce_max(tf.abs(x[1:]-x[:-1])))))
 
     ##unit test 4: 2nd derivative - regular mesh
     print('---Unit test 3: Compute 2nd derivate of x^2-2x+1 in the interval [0,2] sampled on 50 equispaced points---')
-    npts = 100
+    npts = 50
     domain_shape = [npts-2]
     x = np.linspace(0,2,num=npts)
     y = x**2-2*x+1
-    pm = scipy.sparse.dia_matrix((poisson_lhs_matrix(domain_shape, x[1]-x[0], domain_includes_edges = False), [-1,0,1]), shape=(npts-2,npts-2)).toarray()
+    pm = scipy.sparse.dia_matrix((poisson_lhs_matrix(domain_shape, spacings = x[1]-x[0], domain_includes_edges = False), [-1,0,1]), shape=(npts-2,npts-2)).toarray()
     grads = np.einsum('ij,j->i',pm,y[1:-1])
     grads[0] = grads[0]+y[0]*2/((x[1]-x[0])*(x[2]-x[0]))
     grads[-1] = grads[-1]+y[-1]*2/((x[-1]-x[-2])*(x[-1]-x[-3]))
     print(grads-2)
     print('RMS error (reference value=2): ' + str(float(tf.reduce_mean((grads-2)**2)**0.5)))
     print('RMS error on inner pts (reference value=2): ' + str(float(tf.reduce_mean((grads[1:-1]-2)**2)**0.5)))
-    print('Maximal adjacent spacing discrepancy :' + str(float(tf.reduce_max(tf.abs(x[1:]-x[:-1])))))
-
     
-    ##unit test 5: stretching function
-    h = lambda s:s**2
-    domain_shape = [20,40]
-    poisson_lhs_matrix(domain_shape,h)
-    
-
     
     ##tf.constant([100,50,75])#
     # domain_shape = [10,10,10]
