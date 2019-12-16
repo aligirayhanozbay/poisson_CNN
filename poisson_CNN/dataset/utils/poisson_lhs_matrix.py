@@ -1,7 +1,63 @@
 import tensorflow as tf
 from collections.abc import Iterable
 
-def _place_finite_difference_coefficients():
+#@tf.function
+def tile_tensor_to_shape(data, shape, axes = None):
+    #map dimensions of target shape and original shape to each other if not already done so using the optional parameter axes
+    data_shape = tf.keras.backend.shape(data)
+    ndims_data = tf.keras.backend.shape(data_shape)[0]
+    ndims_target = tf.keras.backend.shape(shape)[0]
+        
+    if axes is None:
+        matching_dims = tf.cast(tf.where(tf.abs(shape-tf.expand_dims(data_shape,1))==0),tf.int32)#first creates ndims x len(shape) tensor showing in each row where the data_shape matches target shape. then, tf.where converts to an 2 x (total no of matches) tensor giving coords of each match
+        rows_with_matches, _ = tf.unique(matching_dims[:,0])
+        encountered_dim_sizes = {}#keeps track of encountered dim sizes in loop. necessary in case a dim size is repeated
+        dim_mapping = []#list keeping track of to which index in shape each data dim is mapped to
+        for dim in range(ndims_data):
+            dimr = str(data_shape[dim])
+            if dimr in encountered_dim_sizes:#if a dim is encountered, increment its encounter #. else create it.
+                encountered_dim_sizes[dimr] += 1
+            else:
+                encountered_dim_sizes[dimr] = 0
+            dim_mapping.append(matching_dims[tf.where(matching_dims[:,0]==rows_with_matches[dim])[0,0]:tf.where(matching_dims[:,0]==rows_with_matches[dim])[-1,0]+1][encountered_dim_sizes[dimr],1])#for each dim size, find the mapping onto shape. the index of the mapping is equal to (encountered_dim_sizes[dim])th time an axis size has been encountered in shape.
+    else:
+        dim_mapping = axes
+        
+    dim_mapping = tf.convert_to_tensor(dim_mapping)
+    expanded_shape = tf.Variable(tf.ones((ndims_target,),dtype=tf.int32))#expand the input tensor with additional 1-size dimensions to prepare for tiling
+    for dim in range(ndims_data):
+        expanded_shape[dim_mapping[dim]].assign(data_shape[dim])
+    data = tf.reshape(data,expanded_shape)
+    tiling_list = tf.keras.backend.variable(shape,dtype=tf.int32)#mark non-provided dimensions to be tiled to the appropriate size and provided dimensions to not be tiled
+    for dim in range(ndims_data):
+        tiling_list[dim_mapping[dim]].assign(1)
+    tiling_list = tf.convert_to_tensor(tiling_list)
+    data = tf.tile(data,tiling_list)#tile and return
+    return data
+
+def place_subdiagonal(data, diagonal_index, coefficients_tensor, domain_shape = None, ndims = None):
+    if domain_shape is None:#automatic domain shape inference if not supplied
+        domain_shape = tf.keras.backend.shape(coefficients_tensor)[1:]
+    if ndims is None:
+        ndims = tf.keras.backend.shape(domain_shape)[0]
+    
+    diagonal_index = abs(diagonal_index)
+    if diagonal_index == 0:
+        raise(ValueError('The index supplied for placing a subdiagonal can not be zero.'))
+    sl = tuple([diagonal_index] + [slice(0,domain_shape[k]) for k in range(diagonal_index)] + [slice(0,domain_shape[diagonal_index]-2)] + [Ellipsis])#slice for accessing the sub-array; for subdiagonals the coefficients corresponding to A[...,-1,...] are left as 0
+    tiling_list = tf.concat([domain_shape[:diagonal_index],[1],domain_shape[diagonal_index+1:]],axis=0)
+    data = tf.reshape(data, [1 for k in range(diagonal_index)] + [tf.keras.backend.shape(data)[0]] + [1 for k in range(diagonal_index+1,ndims)])#reshape to add extra 1-length dimensions to prepare for tiling
+    data = tf.tile(data, tiling_list)#tile to match shape
+    if isinstance(coefficients_tensor, tf.Variable):#assign data to slice
+        coefficients_tensor[sl].assign(data)
+    else:
+        coefficients_tensor[sl] = data
+    return
+    
+    
+
+def place_finite_difference_coefficients(diagonals):
+    
     return
 
 def _variablemesh_compute_finite_difference_coefficients(domain_shape, spacings = None, domain_includes_edges = True):
