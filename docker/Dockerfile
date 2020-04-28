@@ -1,0 +1,24 @@
+#poisson_CNN docker image for Nvidia GPUs on amd64 platforms
+FROM nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
+RUN apt update && apt install -y git cmake openmpi-bin python3 python3-pip
+
+RUN cd /
+RUN pip3 install --upgrade pip
+RUN pip3 install jupyterlab		\
+    	 	 tensorflow-gpu==2.1	\
+		 matplotlib		\
+		 scipy			\
+		 cython			
+RUN git clone https://github.com/aligirayhanozbay/poisson_CNN.git
+RUN cd poisson_CNN && pip3 install -e .
+
+RUN cd /
+RUN git clone https://github.com/NVIDIA/AMGX
+RUN mkdir AMGX/build
+RUN cd AMGX/build && cmake ../ && make -j64 all
+
+RUN cd / && git clone https://github.com/shwina/pyamgx && cd pyamgx && export AMGX_DIR=/AMGX/ && pip3 install .
+
+
+
+ENV AMGX_DIR "/AMGX/"
