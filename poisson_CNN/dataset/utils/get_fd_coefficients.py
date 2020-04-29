@@ -15,7 +15,7 @@ def get_fd_coefficients(stencil_positions, order):
     stencil_positions = np.array(sorted(stencil_positions))
     stencil_coefficient_calculation_matrix = np.linalg.inv(np.array([stencil_positions**k for k in range(len(stencil_positions))]))
     stencil_order_vector = np.zeros((len(stencil_positions),))
-    stencil_order_vector[-1] = factorial(order)
+    stencil_order_vector[order] = factorial(order)
     return np.einsum('ij,j->i',stencil_coefficient_calculation_matrix,stencil_order_vector)
 
 if __name__=='__main__':

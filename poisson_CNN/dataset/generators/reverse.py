@@ -46,7 +46,7 @@ def build_fd_coefficients(stencil_size, orders, ndims):
     for dim in range(ndims):
         slices[dim][dim] = slice(0,stencil_size[dim])
         stencil_positions = list(np.arange(-stencil_size[dim]//2+1,stencil_size[dim]//2+1))
-        coefficients[slices[dim]] = get_fd_coefficients(stencil_positions, orders[dim])
+        coefficients[tuple(slices[dim])] += get_fd_coefficients(stencil_positions, orders[dim])
     return coefficients
 
 def choose_conv_method(ndims):
@@ -99,7 +99,14 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         #build slice objects to recover solutions and BCs
         self._soln_slice = [Ellipsis] + [slice(int(self._convolution_input_size_reduction_amount[k]/2),-int(self._convolution_input_size_reduction_amount[k]/2)) for k in range(int(self._convolution_input_size_reduction_amount.shape[0]))]
-        
+
+        self.return_rhses = return_rhses
+        if self.return_rhses:
+            self._rhs_slice = [Ellipsis]
+
+        self.return_boundaries = return_boundaries
+        if self.return_boundaries:
+            pass
                     
         
 
@@ -142,6 +149,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
     @tf.function
     def generate_rhses_from_solutions(self, solutions):
+        
         return self.conv_method(solutions, self.stencil, data_format = 'channels_first')
 
     @tf.function
@@ -151,7 +159,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         return solns[self._soln_slice],rhses
 
 if __name__=='__main__':
-    print(build_fd_coefficients([5,7,5],4,3))
+    print(build_fd_coefficients([5,7,5],3,3))
     rpdg = reverse_poisson_dataset_generator(10,10,[[175,250],[100,150]],[[10,15],[10,15]],[1/249,1/99], homogeneous_bc = True, stencil_size = 5)
     print(rpdg.grid_spacings_range)
     print(rpdg.output_size_range)
