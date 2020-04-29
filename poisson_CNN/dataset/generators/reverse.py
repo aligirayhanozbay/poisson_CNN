@@ -6,22 +6,24 @@ from collections.abc import Iterable
 
 from ..utils import *
 
-def handle_grid_parameters_range(grid_spacings_range, ndims):
-    if not (isinstance(grid_spacings_range, tf.Tensor) or isinstance(grid_spacings_range, np.ndarray)):
-        grid_spacings_range = tf.constant(grid_spacings_range,dtype=tf.keras.backend.floatx())
-    if grid_spacings_range.shape == 2:
-        assert grid_spacings_range[0] < grid_spacings_range[1], 'Upper bound for grid spacings must be larger than or equal to the lower bound!'
-        grid_spacings_range = tf.expand_dims(grid_spacings_range, 0)
-        grid_spacings_range = tf.tile(grid_spacings_range, [ndims,1])
-    assert grid_spacings_range.shape[1] == 2, 'Dim 1 of grid_spacings range must be 2, containing the lower bound and upper bound for the respective spatial dimensions'
-    assert grid_spacings_range.shape[0] == ndims, '1st dim of grid_spacings_range must have identical size to ndims'
-    assert tf.reduce_all((grid_spacings_range[:,1] - grid_spacings_range[:,0]) >= 0.0), 'Dims ' + str(list(tf.reshape(tf.where((grid_spacings_range[:,1]-grid_spacings_range[:,0])<0), (-1,)).numpy())) + ' had upper bound of random range smaller than the lower bound'
-    assert tf.reduce_all(grid_spacings_range[:,0] >= 0.0), 'Dims ' + str(list(tf.reshape(tf.where(grid_spacings_range[:,0]<0), (-1,)).numpy())) + ' had lower bounds of random range below 0'
-    return grid_spacings_range #shape of grid_spacings_range is (ndims,2)
+def handle_grid_parameters_range(value_range, ndims):
+    if not (isinstance(value_range, tf.Tensor) or isinstance(value_range, np.ndarray)):
+        value_range = tf.constant(value_range,dtype=tf.keras.backend.floatx())
+    if value_range.shape == 2:
+        assert value_range[0] < value_range[1], 'Upper bound for grid spacings must be larger than or equal to the lower bound!'
+        value_range = tf.expand_dims(value_range, 0)
+        value_range = tf.tile(value_range, [ndims,1])
+    assert value_range.shape[1] == 2, 'Dim 1 of grid_spacings range must be 2, containing the lower bound and upper bound for the respective spatial dimensions'
+    assert value_range.shape[0] == ndims, '1st dim of value_range must have identical size to ndims'
+    assert tf.reduce_all((value_range[:,1] - value_range[:,0]) >= 0.0), 'Dims ' + str(list(tf.reshape(tf.where((value_range[:,1]-value_range[:,0])<0), (-1,)).numpy())) + ' had upper bound of random range smaller than the lower bound'
+    assert tf.reduce_all(value_range[:,0] >= 0.0), 'Dims ' + str(list(tf.reshape(tf.where(value_range[:,0]<0), (-1,)).numpy())) + ' had lower bounds of random range below 0'
+    return value_range #shape of value_range is (ndims,2)
 
 
-def build_fd_coefficients(stencil_size, orders, ndims):
+def build_fd_coefficients(stencil_size, orders, ndims = None):
     #handle orders input argument
+    if ndims is None:
+        ndims = len(stencil_size)
     if isinstance(orders, int):
         orders = [int(orders) for _ in range(ndims)]
     else:
@@ -41,10 +43,10 @@ def build_fd_coefficients(stencil_size, orders, ndims):
     assert np.all((stencil_size%2) == 1), 'Stencil sizes must be all odd - this program uses symmetric stencils. Stencil sizes supplied were: ' + str(stencil_size)
 
     #build coefficients
-    coefficients = np.zeros(stencil_size)
-    slices = [list(stencil_size//2) for _ in range(ndims)]
+    coefficients = np.zeros(np.insert(stencil_size,0,ndims))
+    slices = [[dim] + list(stencil_size//2) for dim in range(ndims)]
     for dim in range(ndims):
-        slices[dim][dim] = slice(0,stencil_size[dim])
+        slices[dim][dim+1] = slice(0,stencil_size[dim])
         stencil_positions = list(np.arange(-stencil_size[dim]//2+1,stencil_size[dim]//2+1))
         coefficients[tuple(slices[dim])] += get_fd_coefficients(stencil_positions, orders[dim])
     return coefficients
@@ -79,13 +81,13 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         #build fd stencil
         self.stencil = tf.constant(build_fd_coefficients(stencil_size, 2, ndims), dtype=tf.keras.backend.floatx())
-        self._convolution_input_size_reduction_amount = (tf.constant(self.stencil.shape)//2)*2 #convolving an input with the stencil would reduce the input shape of spatial dimensions by the amounts stored in this variable
+        self._convolution_input_size_reduction_amount = (tf.constant(self.stencil.shape[1:])//2)*2 #convolving an input with the stencil would reduce the input shape of spatial dimensions by the amounts stored in this variable
         
         #prepare padding variables if homogeneous bc is required
         self.homogeneous_bc = homogeneous_bc
         if self.homogeneous_bc:
             self._homogeneous_bc_control_pt_grid_paddings = tf.constant([[0,0],[0,0]] + [[1,1] for _ in range(ndims)], dtype=tf.int32)
-            soln_grid_padding_for_one_side = tf.constant([0,0] + list((tf.constant(self.stencil.shape)//2).numpy()), dtype=tf.int32)
+            soln_grid_padding_for_one_side = tf.constant([0,0] + list((tf.constant(self.stencil.shape[1:])//2).numpy()), dtype=tf.int32)
             self._homogeneous_bc_soln_grid_paddings = tf.stack([soln_grid_padding_for_one_side, soln_grid_padding_for_one_side],1)
             
         #set max magnitude for outputs
@@ -93,9 +95,6 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         #set correct conv method to use when building rhs from solution
         self.conv_method = choose_conv_method(ndims)
-
-        #adjust stencil shape for use with the conv method
-        self.stencil = tf.expand_dims(tf.expand_dims(self.stencil, -1), -1)
 
         #build slice objects to recover solutions and BCs
         self._soln_slice = [Ellipsis] + [slice(int(self._convolution_input_size_reduction_amount[k]/2),-int(self._convolution_input_size_reduction_amount[k]/2)) for k in range(int(self._convolution_input_size_reduction_amount.shape[0]))]
@@ -149,8 +148,11 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
     @tf.function
     def generate_rhses_from_solutions(self, solutions):
-        
-        return self.conv_method(solutions, self.stencil, data_format = 'channels_first')
+        grid_spacings = self.generate_grid_spacings()
+        finite_difference_conv_kernels = tf.einsum('ij,j...->i...',grid_spacings,self.stencil)#convert stencil to kernels
+        finite_difference_conv_kernels = tf.expand_dims(tf.expand_dims(finite_difference_conv_kernels, -1), -1)#adjust kernel dims for use with the conv method
+        rhses = tf.map_fn(lambda x: self.conv_method(x=x[0], kernel=x[1], data_format = 'channels_first')[0],(tf.expand_dims(solutions,1), finite_difference_conv_kernels), dtype=tf.keras.backend.floatx())#perform the conv for each
+        return rhses
 
     @tf.function
     def __getitem__(self, idx = 0):
@@ -159,7 +161,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         return solns[self._soln_slice],rhses
 
 if __name__=='__main__':
-    print(build_fd_coefficients([5,7,5],3,3))
+    print(build_fd_coefficients([5,7,5],4,3))
     rpdg = reverse_poisson_dataset_generator(10,10,[[175,250],[100,150]],[[10,15],[10,15]],[1/249,1/99], homogeneous_bc = True, stencil_size = 5)
     print(rpdg.grid_spacings_range)
     print(rpdg.output_size_range)
