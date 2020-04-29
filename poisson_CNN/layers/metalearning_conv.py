@@ -3,36 +3,31 @@ from collections.abc import Iterable
 
 def convolution_and_bias_add_closure(data_format, conv_method, use_bias):
     if use_bias:
-
-        #@tf.function
-        def single_sample_convolution_and_batch_add(inputs):#conv_input, kernel, bias, strides, dilations):
-            conv_input, kernel, bias, strides, dilations = inputs
+        @tf.function
+        def single_sample_convolution_and_bias_add(conv_input, kernel, bias):
             conv_input = tf.expand_dims(conv_input, 0)
-            output = conv_method(conv_input, kernel, strides = strides, padding = "VALID", data_format = data_format, dilations = None)
+            output = conv_method(conv_input, kernel, padding = "VALID", data_format = data_format)
             output = tf.nn.bias_add(output, bias, data_format = data_format)
             return output[0,...]
 
-        #@tf.function
-        def convolution_with_batched_kernels(conv_input, kernels, biases, strides, dilations):
+        @tf.function
+        def convolution_with_batched_kernels(conv_input, kernels, biases):
             batch_size = tf.keras.backend.shape(conv_input)[0]
-            strides = tf.tile(tf.expand_dims(strides,0), [batch_size, 1])
-            dilations = tf.tile(tf.expand_dims(dilations,0), [batch_size, 1])
-            output = tf.map_fn(single_sample_convolution_and_batch_add, [conv_input, kernels, biases, strides, dilations], dtype = tf.keras.backend.floatx(), parallel_iterations = 32)
+            output = tf.map_fn(lambda x: single_sample_convolution_and_bias_add(x[0],x[1],x[2]), [conv_input, kernels, biases], dtype = tf.keras.backend.floatx())
+            return output
+    else:
+        @tf.function
+        def single_sample_convolution(conv_input, kernel):
+            conv_input = tf.expand_dims(conv_input, 0)
+            output = conv_method(conv_input, kernel, padding = "VALID", data_format = data_format)
+            return output[0,...]
+
+        @tf.function
+        def convolution_with_batched_kernels(conv_input, kernels):
+            batch_size = tf.keras.backend.shape(conv_input)[0]
+            output = tf.map_fn(lambda x: single_sample_convolution(x[0],x[1]), [conv_input, kernels], dtype = tf.keras.backend.floatx())
             return output
         
-    else:
-        #@tf.function
-        def single_sample_convolution_and_batch_add(conv_input, kernel, strides, dilations):
-            conv_input = tf.expand_dims(conv_input, 0)
-            output = conv_method(conv_input, kernel, strides = strides, padding = "VALID", data_format = data_format, dilation_rate = dilations)
-            return output[0,...]
-        #@tf.function
-        def convolution_with_batched_kernels(conv_input, kernels, biases, strides, dilations):
-            batch_size = tf.keras.backend.shape(conv_input)[0]
-            strides = tf.tile(tf.expand_dims(strides,0), [batch_size, 1])
-            dilations = tf.tile(tf.expand_dims(dilations,0), [batch_size, 1])
-            output = tf.map_fn(single_sample_convolution_and_batch_add, [conv_input, kernels, strides, dilations], dtype = tf.keras.backend.floatx(), parallel_iterations = batch_size)
-            return output
     return convolution_with_batched_kernels
 
 def convert_keras_dataformat_to_tf(df,ndims):
@@ -53,21 +48,12 @@ class metalearning_conv(tf.keras.models.Model):
             self.dimensions = len(filters)
         else:
             self.dimensions = dimensions
-
-        if self.dimensions == 1:
-            self.conv_method = tf.nn.conv1d#tf.keras.backend.conv1d
-        elif self.dimensions == 2:
-            self.conv_method = tf.nn.conv2d#tf.keras.backend.conv2d
-        elif self.dimensions == 3:
-            self.conv_method = tf.nn.conv3d#tf.keras.backend.conv3d
-        else:
-            raise(ValueError('dimensions must be 1,2 or 3'))
         
         if isinstance(kernel_size, int):
             self.kernel_size = [kernel_size for _ in range(self.dimensions)]
 
         if dilation_rate is None:
-            self.dilation_rate = tf.constant([1 for _ in range(self.dimensions)])
+            self.dilation_rate = [1 for _ in range(self.dimensions)]
         else:
             self.dilation_rate = dilation_rate
 
@@ -75,7 +61,7 @@ class metalearning_conv(tf.keras.models.Model):
             self.strides = [1 for _ in range(self.dimensions)]
         else:
             self.strides = strides
-        #print(self.strides)
+        print(self.strides)
 
         self.conv_activation = conv_activation
         
@@ -109,9 +95,19 @@ class metalearning_conv(tf.keras.models.Model):
             
         self.dense_layers = [tf.keras.layers.Dense(pre_output_dense_units[k], activation = dense_activations[k], **dense_layer_args) for k in range(len(pre_output_dense_units))] + [tf.keras.layers.Dense(tf.reduce_prod(self.kernel_shape)+self.bias_shape, activation = dense_activations[-1], **dense_layer_args)]
 
+        if self.dimensions == 1:
+            self.conv_method = lambda *args, **kwargs: tf.nn.conv1d(*args, strides = self.strides, dilations = self.dilation_rate, **kwargs)#tf.keras.backend.conv1d
+        elif self.dimensions == 2:
+            #self.conv_method = lambda *args, **kwargs: tf.keras.backend.conv2d(*args, strides = self.strides, dilation_rate = self.dilation_rate, **kwargs)
+            self.conv_method = lambda *args, **kwargs: tf.nn.conv2d(*args, strides = self.strides, dilations = self.dilation_rate, **kwargs)
+        elif self.dimensions == 3:
+            self.conv_method = lambda *args, **kwargs: tf.nn.conv3d(*args, strides = self.strides, dilations = self.dilation_rate, **kwargs)
+        else:
+            raise(ValueError('dimensions must be 1,2 or 3'))
+        
         self.conv_method = convolution_and_bias_add_closure(self._tf_data_format, self.conv_method, self.use_bias)
 
-
+    @tf.function
     def call(self, inputs):
 
         conv_input = inputs[0]
@@ -128,14 +124,14 @@ class metalearning_conv(tf.keras.models.Model):
 
         if self.use_bias:
             bias = conv_kernel_and_bias[:,-tf.squeeze(self.bias_shape):]
-            output = self.conv_method(conv_input, conv_kernel, bias, self.strides, self.dilation_rate)
+            output = self.conv_method(conv_input, conv_kernel, bias)
         else:
-            output = self.conv_method(conv_input, conv_kernel, self.strides, self.dilation_rate)
+            output = self.conv_method(conv_input, conv_kernel)
 
         return self.conv_activation(output)
 
 if __name__ == '__main__':
-    mod = metalearning_conv(2, 5, 5, conv_activation = tf.nn.relu, dimensions = 2, data_format = 'channels_first', padding='same', padding_mode='SYMMETRIC')
+    mod = metalearning_conv(2, 5, 5, conv_activation = tf.nn.relu, dimensions = 2, data_format = 'channels_first', padding='same', padding_mode='SYMMETRIC', use_bias = True)
     convinp = tf.random.uniform((10,2,100,100))
     denseinp = 2*tf.random.uniform((10,5))-1
 
@@ -144,7 +140,7 @@ if __name__ == '__main__':
     print(res.shape)
     import time
     t0 = time.time()
-    ntrials = 25
+    ntrials = 100
     for k in range(ntrials):
         q = mod([convinp,denseinp])
     print((time.time()-t0)/ntrials)
