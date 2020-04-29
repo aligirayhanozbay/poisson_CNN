@@ -70,7 +70,24 @@ def generate_random_grids(shapes):
     return tf.map_fn(generate_single_random_grid, shapes, back_prop = False, dtype = tf.keras.backend.floatx(), parallel_iterations = 32)
 
 class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
-    def __init__(self, batch_size, batches_per_epoch, output_size_range, control_pt_grid_size_range, grid_spacings_range, ndims = 2, stencil_size = 5, solution_smoothness_range = None, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
+    def __init__(self, batch_size, batches_per_epoch, output_size_range, control_pt_grid_size_range, grid_spacings_range, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
+        '''
+        Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution and then using finite difference schemes to generate the RHS. Smooth results are ensured by generating random solutions on a low res control pt grid and then using cubic/bi-cubic/tri-cubic upsampling to the target resolution
+
+        Inputs:
+        -batch_size: int. Number of samples to generate each time __getitem__ is called
+        -batches_per_epoch: int. Determines the number of batches to generate per keras epoch. New, random data are generated each time __getitem__ is called, so this is mostly for compatibility purposes
+        -output_size_range: List of 2 ints, list of list of 2 ints, or np.ndarray/tf.Tensor of shape (ndims,2). Determines the range of random values from which the size of each spatial dimension will be picked for each batch (i.e. random value range for the shape of the  spatial dimensions)
+        -control_pt_grid_size_range: List of 2 ints, list of list of 2 ints, or np.ndarray/tf.Tensor of shape (ndims,2). Same as output_size range, but determines the range for the control pt grid size. Higher values create less smooth outputs.
+        -grid_spacings_range:  List of 2 floats, list of list of 2 floats, or np.ndarray/tf.Tensor of shape (ndims,2). Determines the range of values that the grid spacings can take for each dimension.
+        -ndims: int. Number of spatial dimensions.
+        -stencil_size: Odd int or list of odd ints. Determines the size of the FD stencil to be used for each dimension.
+        -homogeneous_bc: bool. If set to true, solutions with homogeneous BCs will be returned only.
+        -return_rhses: bool. If set to true, RHSes will be returned
+        -return_boundaries: bool. If set to true, BCs will be returned.
+        -return_dx: bool. If set to true, grid spacings will be returned.
+        -max_magnitude:
+        '''
         self.batch_size = batch_size
         self.ndims = ndims
         self.batches_per_epoch = batches_per_epoch
