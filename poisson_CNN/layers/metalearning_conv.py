@@ -66,6 +66,8 @@ class metalearning_conv(tf.keras.models.Model):
         
         if isinstance(kernel_size, int):
             self.kernel_size = [kernel_size for _ in range(self.dimensions)]
+        else:
+            self.kernel_size = kernel_size
 
         if dilation_rate is None:
             self.dilation_rate = [1 for _ in range(self.dimensions)]
@@ -76,7 +78,6 @@ class metalearning_conv(tf.keras.models.Model):
             self.strides = [1 for _ in range(self.dimensions)]
         else:
             self.strides = strides
-        print(self.strides)
 
         self.conv_activation = conv_activation
         
