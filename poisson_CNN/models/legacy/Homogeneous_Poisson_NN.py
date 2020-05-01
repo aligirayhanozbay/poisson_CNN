@@ -6,9 +6,9 @@ import string
 
 from .custom_blocks import ResampledConvolutionBlock, ResnetBlock, AveragePoolingBlock, Scaling
 from .Model_With_Integral_Loss import Model_With_Integral_Loss_ABC
-from ..layers import MergeWithAttention
-from ..layers import Upsample
-from ..layers import SpatialPyramidPool
+from ...layers import MergeWithAttention
+from ...layers import Upsample
+from ...layers import SpatialPyramidPool
 #from ..layers import Scaling
 
 def channels_first_rot_90(image,k=1):

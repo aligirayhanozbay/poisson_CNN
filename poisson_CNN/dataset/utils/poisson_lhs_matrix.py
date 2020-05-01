@@ -1,6 +1,6 @@
 import tensorflow as tf
 from collections.abc import Iterable
-from assign_to_tensor_index import assign_to_tensor_index
+from .assign_to_tensor_index import assign_to_tensor_index
 
 @tf.function
 def tile_tensor_to_shape(data, shape, axes = None):
