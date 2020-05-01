@@ -1,12 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-#@tf.function
-def interpolate_grid_values_onto_points(grid_values, grid_coords, target_coords):
-    '''
-    Interpolates the values stored in grid_values at coordinates at grid_coords to the coordinates in target_coords.
-    '''
-    ndims = tf.shape(grid_coords)[0]
+import opt_einsum as oe
 
 @tf.function
 def find_neighbouring_indices_along_axis(grid_sizes, quadrature_coords_along_axis, dim):
@@ -56,26 +51,10 @@ def build_corner_coordinate_combinations(corner_coords, ndims):
     corner_coords = [tile_1d_tensor_to_shape(coords,k,resulting_shape) for k,coords in enumerate(corner_coords)]
     return tf.stack(corner_coords,-1)
 
-'''
-#@tf.function
-def binary_numbers_up_to_value(k):
-    bits = int(tf.cast(tf.math.ceil(tf.math.log(tf.cast(k,tf.keras.backend.floatx()))/tf.math.log(2.0)),tf.int32))
-    return [[int(s) for s in list(('{0:0' + str(bits) + 'b}').format(i))] for i in range(k)]
-'''
 def binary_numbers_up_to_value(k):
     bits = int(tf.cast(tf.math.ceil(tf.math.log(tf.cast(k,tf.keras.backend.floatx()))/tf.math.log(2.0)),tf.int32))
     return np.array([list(reversed([int(s) for s in list(('{0:0' + str(bits) + 'b}').format(i))])) for i in range(k)])
 
-'''
-def sample_values_enclosing_GL_quadrature_points_from_grid(*neighbouring_indices, grid, data_format):
-    values = np.zeros([indices.shape[0] for indices in neighbouring_indices] + [2**len(neighbouring_indices)])
-    target_shape = [indices.shape[0] for indices in neighbouring_indices]
-    tiled_indices = [neighbouring_indices[k].reshape([1 for _ in range(k)]+[neighbouring_indices[k].shape[0]]+[1 for _ in range(len(grid.shape)-k-3)]+[2]) for k in range(len(neighbouring_indices))]
-    tiled_indices = [np.tile(indices,target_shape[:k] + [1] + target_shape[k+1:] + [1]) for k,indices in enumerate(tiled_indices)]
-    import pdb
-    pdb.set_trace()
-    return 3.0
-'''
 @tf.function
 def sample_values_enclosing_GL_quadrature_points_from_grid(*neighbouring_indices, grid, corner_labels, data_format):
     #values = np.zeros([indices.shape[0] for indices in neighbouring_indices] + [2**len(neighbouring_indices)])
@@ -126,9 +105,14 @@ class integral_loss:
         return tf.map_fn(lambda x: tf.reduce_prod(tf.boolean_mask(corner_coord,x),axis=0),self.corner_indices,dtype=corner_coord.dtype)
         
     @tf.function
-    def __call__(self,y_true, y_pred):
-        #y_pred, dx = y_pred #unpack predictions
+    def __call__(self, y_true, y_pred):
         gridshape = tf.shape(y_true)
+        try:
+            y_pred, dx = y_pred
+            domain_size = tf.einsum('i,bi->bi',tf.cast((gridshape[2:] if self.data_format == 'channels_first' else gridshape[1:-1])-1,dx.dtype),dx)
+        except:
+            domain_size = 2*tf.ones([gridshape[0],self.ndims])
+        
         neighbouring_indices = self.find_neighbouring_indices(gridshape)
         input_grid_coordinates = self.get_input_grid_coordinates(gridshape)
 
@@ -160,19 +144,33 @@ class integral_loss:
         loss_at_quadrature_points = tf.einsum(loss_at_quadrature_points_einsum_str,self.multilinear_interpolation_basis_polynomial_values_at_quadrature_coords, interpolation_coefficients)
 
         #integrate using GL quadrature
-        losses_einsum_str = 'ij...,...->ij' if self.data_format == 'channels_first' else 'i...j,...->ij'
+        losses_einsum_str = 'ij...,...->ij...' if self.data_format == 'channels_first' else 'i...j,...->ij...'
         losses = tf.einsum(losses_einsum_str,loss_at_quadrature_points, self.quadrature_weights)
+        losses = tf.reduce_sum(losses, axis = [k for k in range(2,self.ndims+2)])
+        losses = tf.einsum('ij,i->ij',losses,tf.reduce_prod(domain_size,axis=1))/(2**self.ndims)
         
         return losses
     
 if __name__=='__main__':
-    loss_func = integral_loss((10,15,25))
-    t = tf.einsum('i,j,k,l->ijkl',tf.linspace(0.5,1.5,10),tf.linspace(0.1,0.4,100),tf.linspace(1.5,2.5,150),tf.linspace(0.8,1.2,140))
-    t = tf.expand_dims(t,1)
-    #t = tf.zeros((10,1,100,150,140), dtype = tf.keras.backend.floatx())
-    y = t + tf.sin(t)
-    dc = loss_func(y,t)
-    #print(dc.shape)
-    import pdb
-    pdb.set_trace()
-    print(binary_numbers_up_to_value(8))
+    print('---Integral loss unit test---')
+    print('Integrate (xyz)^(2/3) in the domain [[0,1],[0,2],[1,3.5]]')
+    loss_func = integral_loss((25,13,28), ndims = 3)
+    print('Integral loss instantiated')
+    x = tf.linspace(0.0,1.0,150)
+    y = tf.linspace(0.0,2.0,200)
+    z = tf.linspace(1.0,3.5,175)
+
+    t = tf.einsum('i,j,k->ijk',x,y,z)**(1/3)
+    t = tf.expand_dims(tf.expand_dims(t,0),0)
+    dx = tf.stack([[x[1]-x[0],y[1]-y[0],z[1]-z[0]]])
+
+    u = tf.zeros(t.shape)
+    print('Test variables created')
+    
+    dc = loss_func(t,[u,dx])
+    print('Integration calculation ran.')
+    true_soln = 4.84711
+    assert dc.shape == tf.TensorShape([t.shape[0],t.shape[1]])
+    print('Output shape correct: ' + str(dc.shape))
+    assert tf.abs((true_soln - dc[0,0])/true_soln) < 0.01
+    print('Value correctly computed. Calculated value: ' + str(dc.numpy()[0,0]) + ' | Target value: ' + str(true_soln) + ' | Error: ' + str(tf.abs((true_soln - dc[0,0])/true_soln).numpy()) + '%')
