@@ -1,8 +1,6 @@
 import tensorflow as tf
 import numpy as np
 
-import opt_einsum as oe
-
 @tf.function
 def find_neighbouring_indices_along_axis(grid_sizes, quadrature_coords_along_axis, dim):
     dim_size = grid_sizes[dim]
