@@ -41,7 +41,7 @@ def expand_1d_tensor_to_k_dims(tensor, dim, ndims):
 
 @tf.function
 def tile_1d_tensor_to_shape(tensor, dim, newshape):
-    tilings = tf.concat([newshape[:dim], tf.constant([1], dtype = tf.int32), newshape[dim+1:]],0)#[1 for _ in range(dim)] + [-1] + [1 for _ in range(ndims-dim-1)]
+    tilings = tf.concat([newshape[:dim], tf.constant([1], dtype = tf.int32), newshape[dim+1:]],0)
     return tf.tile(tensor,tilings)
 
 @tf.function
@@ -57,7 +57,6 @@ def binary_numbers_up_to_value(k):
 
 @tf.function
 def sample_values_enclosing_GL_quadrature_points_from_grid(*neighbouring_indices, grid, corner_labels, data_format):
-    #values = np.zeros([indices.shape[0] for indices in neighbouring_indices] + [2**len(neighbouring_indices)])
     target_shape = [indices.shape[0] for indices in neighbouring_indices]
     tiled_indices = [tf.reshape(neighbouring_indices[k],[1 for _ in range(k)]+[neighbouring_indices[k].shape[0]]+[1 for _ in range(len(grid.shape)-k-3)]+[2]) for k in range(len(neighbouring_indices))]
     tiled_indices = [tf.tile(indices,target_shape[:k] + [1] + target_shape[k+1:] + [1]) for k,indices in enumerate(tiled_indices)]
@@ -75,6 +74,15 @@ def sample_values_enclosing_GL_quadrature_points_from_grid(*neighbouring_indices
 
 class integral_loss:
     def __init__(self, n_quadpts, ndims = None, Lp_norm_power = 2, data_format = 'channels_first'):
+        '''
+        This is a loss function which calculates the integral (or continuous) Lp norm of the ground truth and the prediction instead of the discrete Lp norm. (y-t)^p is interpolated onto the Gauss-Legendre quadrature points using multilinear interpolation and then the integral of the quantity over the domain is approximated with the GL quadrature method.
+
+        Init arguments:
+        -n_quadpts: int or tuple of ints. Determines the number of quadrature points along each dimension.
+        -ndims: int. Number of spatial dimensions. Necessary only if an int value is passed as n_quadpts.
+        -Lp_norm_power: int. Determines the order of the norm.
+        -data_format: str. see tf.keras documentation.
+        '''
         if ndims is None:
             ndims = len(n_quadpts)
         if isinstance(n_quadpts, int):
@@ -106,6 +114,13 @@ class integral_loss:
         
     @tf.function
     def __call__(self, y_true, y_pred):
+        '''
+        Calculate the Lp norm.
+
+        Inputs:
+        -y_true: tf.Tensor of shape (batch_size,n_channels,...) or (batch_size,...,n_channels) depending on self.data_format. Ground truth.
+        -y_pred: tf.Tensor of shape identical to y_true or a list of 2 tensors, first of which has shape identical to y_true and second is of shape (batch_size,self.ndims). Contains the prediction and, optionally, a grid spacing value that can be used to adjust loss calculation to domains other than the default [-1,1] x ... x [-1,1]
+        '''
         gridshape = tf.shape(y_true)
         try:
             y_pred, dx = y_pred
