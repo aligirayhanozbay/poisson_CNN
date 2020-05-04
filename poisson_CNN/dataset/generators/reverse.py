@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorflow_probability as tfp
 import itertools
 import numpy as np
 import multiprocessing
@@ -66,8 +67,9 @@ def generate_single_random_grid(*args):
     return tf.random.uniform(*args, dtype=tf.keras.backend.floatx())
 
 @tf.function
-def generate_random_grids(shapes):
-    return tf.map_fn(generate_single_random_grid, shapes, back_prop = False, dtype = tf.keras.backend.floatx(), parallel_iterations = 32)
+def generate_random_grids(grid_size,k):
+    grid_sizes = tf.tile(tf.expand_dims(grid_size,0),[k,1])
+    return tf.map_fn(generate_single_random_grid, grid_sizes, back_prop = False, dtype = tf.keras.backend.floatx(), parallel_iterations = 32)
 
 class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     def __init__(self, batch_size, batches_per_epoch, output_size_range, control_pt_grid_size_range, grid_spacings_range, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
@@ -89,6 +91,12 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         -max_magnitude:
         '''
         self.batch_size = batch_size
+        if ndims is None:
+            for k in [output_size_range,control_pt_grid_size_range]:
+                try:
+                    ndims = len(k)
+                except:
+                    pass
         self.ndims = ndims
         self.batches_per_epoch = batches_per_epoch
         self.grid_spacings_range = handle_grid_parameters_range(grid_spacings_range, ndims)
@@ -117,12 +125,18 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         self._soln_slice = [Ellipsis] + [slice(int(self._convolution_input_size_reduction_amount[k]/2),-int(self._convolution_input_size_reduction_amount[k]/2)) for k in range(int(self._convolution_input_size_reduction_amount.shape[0]))]
 
         self.return_rhses = return_rhses
-        if self.return_rhses:
-            self._rhs_slice = [Ellipsis]
 
         self.return_boundaries = return_boundaries
         if self.return_boundaries:
-            pass
+            self._boundary_slices = []
+            for k in range(self.ndims):
+                sl0 = [Ellipsis] + [slice(0,None) for k in range(k)] + [0] + [slice(0,None) for k in range(ndims-k-1)]
+                sl1 = [Ellipsis] + [slice(0,None) for k in range(k)] + [-1] + [slice(0,None) for k in range(ndims-k-1)]
+                self._boundary_slices.append(sl0)
+                self._boundary_slices.append(sl1)
+
+        self.return_dx = return_dx
+
                     
         
 
@@ -138,27 +152,43 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
     @tf.function
     def generate_grid_sizes(self, grid_size_range):
-        #grid sizes shape: (batch_size, ndims)
+        #grid sizes shape: (ndims,)
+        '''
         grid_sizes = tf.random.uniform((1,self.ndims), dtype = tf.keras.backend.floatx())
         grid_sizes = tf.tile(grid_sizes, [self.batch_size, 1])
         grid_sizes = tf.einsum('ij,j->ij', grid_sizes, grid_size_range[:,1] - grid_size_range[:,0]) + grid_size_range[:,0] + 1
+        grid_sizes = tf.cast(grid_sizes, tf.int32)
+        '''
+        grid_sizes = tf.random.uniform((self.ndims,), dtype = tf.keras.backend.floatx())
+        grid_sizes = (grid_size_range[:,1] - grid_size_range[:,0]) * grid_sizes + grid_size_range[:,0] + 1
         grid_sizes = tf.cast(grid_sizes, tf.int32)
         return grid_sizes
 
     @tf.function
     def adjust_grid_sizes_for_operator_application(self, grid_sizes):
         return grid_sizes + self._convolution_input_size_reduction_amount
+
+    @tf.function
+    def interpolate_control_pts_to_target_shape(self,control_pts,target_shape):
+        linspace_start = tf.cast(0.0,tf.keras.backend.floatx())
+        linspace_end = tf.cast(1.0,tf.keras.backend.floatx())
+        print(target_shape)
+        fine_grid_coords = tf.reshape(tf.stack(tf.meshgrid(*[tf.linspace(linspace_start,linspace_end,target_shape[k]) for k in range(self.ndims)], indexing='ij'),-1),[1,tf.reduce_prod(target_shape),self.ndims])
+        domain_lower_corner = tf.constant([[0.0 for k in range(self.ndims)]],dtype=tf.keras.backend.floatx())
+        domain_upper_corner = tf.constant([[1.0 for k in range(self.ndims)]],dtype=tf.keras.backend.floatx())
+        fine_grid_values = tfp.math.batch_interp_regular_nd_grid(fine_grid_coords,domain_lower_corner,domain_upper_corner,control_pts,-self.ndims)
+        return tf.reshape(fine_grid_values,tf.concat([tf.shape(control_pts)[:2],target_shape],0))
     
     @tf.function
     def generate_soln(self):
         low_res_grid_sizes = self.generate_grid_sizes(self.control_pt_grid_size_range)
-        control_pts = tf.expand_dims(generate_random_grids(low_res_grid_sizes),1)
+        control_pts = tf.expand_dims(generate_random_grids(low_res_grid_sizes,self.batch_size),1)
         if self.homogeneous_bc:#if homogeneous bcs are desired, after generating the control pt grid, pad it with 0s, upsample, pad again with 0s to the same shape the soln would have taken otherwise
             control_pts = tf.pad(control_pts, self._homogeneous_bc_control_pt_grid_paddings, mode='CONSTANT', constant_values=0)
             soln_grid_size = self.generate_grid_sizes(self.output_size_range)
         else:
             soln_grid_size = self.adjust_grid_sizes_for_operator_application(self.generate_grid_sizes(self.output_size_range))
-        soln_values = image_resize(control_pts, soln_grid_size,data_format = 'channels_first')
+        soln_values = self.interpolate_control_pts_to_target_shape(control_pts,soln_grid_size)
         if self.homogeneous_bc:
             soln_values = tf.pad(soln_values, self._homogeneous_bc_soln_grid_paddings, mode='CONSTANT', constant_values = 0)
         return soln_values
@@ -169,25 +199,35 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         finite_difference_conv_kernels = tf.einsum('ij,j...->i...',grid_spacings,self.stencil)#convert stencil to kernels
         finite_difference_conv_kernels = tf.expand_dims(tf.expand_dims(finite_difference_conv_kernels, -1), -1)#adjust kernel dims for use with the conv method
         rhses = tf.map_fn(lambda x: self.conv_method(x=x[0], kernel=x[1], data_format = 'channels_first')[0],(tf.expand_dims(solutions,1), finite_difference_conv_kernels), dtype=tf.keras.backend.floatx())#perform the conv for each
-        return rhses
+        return rhses, grid_spacings
+
+    @tf.function
+    def pack_outputs(self, rhses, solns, grid_spacings):
+        solns = solns[self._soln_slice]
+
+        problem_definition = []
+        if self.return_rhses:
+            problem_definition.append(rhses)
+
+        if self.return_boundaries:
+            for sl in self._boundary_slices:
+                problem_definition.append(solns[sl])
+
+        if self.return_dx:
+            problem_definition.append(grid_spacings)
+
+        return problem_definition, solns
 
     @tf.function
     def __getitem__(self, idx = 0):
         solns = self.generate_soln()
-        rhses = self.generate_rhses_from_solutions(solns)
-        return solns[self._soln_slice],rhses
+        rhses, grid_spacings = self.generate_rhses_from_solutions(solns)
+        out = self.pack_outputs(rhses, solns, grid_spacings)
+        return out
 
 if __name__=='__main__':
-    print(build_fd_coefficients([5,7,5],4,3))
-    rpdg = reverse_poisson_dataset_generator(10,10,[[175,250],[100,150]],[[10,15],[10,15]],[1/249,1/99], homogeneous_bc = True, stencil_size = 5)
-    print(rpdg.grid_spacings_range)
-    print(rpdg.output_size_range)
-    print(rpdg.generate_grid_spacings())
-    gs = rpdg.generate_grid_sizes(rpdg.output_size_range)
-    print(gs)
-    ags = rpdg.adjust_grid_sizes_for_operator_application(gs)
-    print(ags)
-    print(generate_random_grids(ags).shape)
-    print(rpdg.generate_soln().shape)
-    print([x.shape for x in rpdg.__getitem__()])
-        
+    rpdg = reverse_poisson_dataset_generator(10,10,[[175,250],[100,150],[50,80]],[[10,15],[10,15],[10,15]],[1/249,1/49], homogeneous_bc = True, stencil_size = 5)
+    inp, out = rpdg.__getitem__()
+    import pdb
+    pdb.set_trace()
+    
