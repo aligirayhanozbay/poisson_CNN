@@ -64,7 +64,7 @@ def choose_conv_method(ndims):
 
 @tf.function
 def generate_single_random_grid(*args):
-    return tf.random.uniform(*args, dtype=tf.keras.backend.floatx())
+    return 2*tf.random.uniform(*args, dtype=tf.keras.backend.floatx())-1
 
 @tf.function
 def generate_random_grids(grid_size,k):
@@ -72,7 +72,7 @@ def generate_random_grids(grid_size,k):
     return tf.map_fn(generate_single_random_grid, grid_sizes, back_prop = False, dtype = tf.keras.backend.floatx(), parallel_iterations = 32)
 
 class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
-    def __init__(self, batch_size, batches_per_epoch, output_size_range, control_pt_grid_size_range, grid_spacings_range, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
+    def __init__(self, batch_size, batches_per_epoch, output_size_range, control_pt_grid_size_range, grid_spacings_range = None, normalize_domain_size = False, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
         '''
         Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution and then using finite difference schemes to generate the RHS. Smooth results are ensured by generating random solutions on a low res control pt grid and then using cubic/bi-cubic/tri-cubic upsampling to the target resolution
 
@@ -99,8 +99,8 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
                     pass
         self.ndims = ndims
         self.batches_per_epoch = batches_per_epoch
-        self.grid_spacings_range = handle_grid_parameters_range(grid_spacings_range, ndims)
 
+        self.grid_spacings_range = handle_grid_parameters_range(grid_spacings_range, ndims)
         self.output_size_range = handle_grid_parameters_range(output_size_range, ndims)
         self.control_pt_grid_size_range = handle_grid_parameters_range(control_pt_grid_size_range, ndims)
 
@@ -136,7 +136,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
                 self._boundary_slices.append(sl1)
 
         self.return_dx = return_dx
-
+        self.normalize_domain_size = normalize_domain_size
                     
         
 
@@ -153,12 +153,6 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     @tf.function
     def generate_grid_sizes(self, grid_size_range):
         #grid sizes shape: (ndims,)
-        '''
-        grid_sizes = tf.random.uniform((1,self.ndims), dtype = tf.keras.backend.floatx())
-        grid_sizes = tf.tile(grid_sizes, [self.batch_size, 1])
-        grid_sizes = tf.einsum('ij,j->ij', grid_sizes, grid_size_range[:,1] - grid_size_range[:,0]) + grid_size_range[:,0] + 1
-        grid_sizes = tf.cast(grid_sizes, tf.int32)
-        '''
         grid_sizes = tf.random.uniform((self.ndims,), dtype = tf.keras.backend.floatx())
         grid_sizes = (grid_size_range[:,1] - grid_size_range[:,0]) * grid_sizes + grid_size_range[:,0] + 1
         grid_sizes = tf.cast(grid_sizes, tf.int32)
@@ -172,7 +166,6 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     def interpolate_control_pts_to_target_shape(self,control_pts,target_shape):
         linspace_start = tf.cast(0.0,tf.keras.backend.floatx())
         linspace_end = tf.cast(1.0,tf.keras.backend.floatx())
-        print(target_shape)
         fine_grid_coords = tf.reshape(tf.stack(tf.meshgrid(*[tf.linspace(linspace_start,linspace_end,target_shape[k]) for k in range(self.ndims)], indexing='ij'),-1),[1,tf.reduce_prod(target_shape),self.ndims])
         domain_lower_corner = tf.constant([[0.0 for k in range(self.ndims)]],dtype=tf.keras.backend.floatx())
         domain_upper_corner = tf.constant([[1.0 for k in range(self.ndims)]],dtype=tf.keras.backend.floatx())
@@ -196,7 +189,11 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     @tf.function
     def generate_rhses_from_solutions(self, solutions):
         grid_spacings = self.generate_grid_spacings()
-        finite_difference_conv_kernels = tf.einsum('ij,j...->i...',grid_spacings,self.stencil)#convert stencil to kernels
+        if self.normalize_domain_size:
+            domain_sizes = tf.einsum('ij,j->ij',grid_spacings,tf.cast(tf.shape(solutions[self._soln_slice])[2:],grid_spacings.dtype))
+            max_domain_size = tf.reduce_max(domain_sizes,1)
+            grid_spacings = tf.einsum('ij,i->ij',grid_spacings,1/max_domain_size)
+        finite_difference_conv_kernels = tf.einsum('ij,j...->i...',1/(grid_spacings**2),self.stencil)#convert stencil to kernels
         finite_difference_conv_kernels = tf.expand_dims(tf.expand_dims(finite_difference_conv_kernels, -1), -1)#adjust kernel dims for use with the conv method
         rhses = tf.map_fn(lambda x: self.conv_method(x=x[0], kernel=x[1], data_format = 'channels_first')[0],(tf.expand_dims(solutions,1), finite_difference_conv_kernels), dtype=tf.keras.backend.floatx())#perform the conv for each
         return rhses, grid_spacings
@@ -226,8 +223,42 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         return out
 
 if __name__=='__main__':
-    rpdg = reverse_poisson_dataset_generator(10,10,[[175,250],[100,150],[50,80]],[[10,15],[10,15],[10,15]],[1/249,1/49], homogeneous_bc = True, stencil_size = 5)
-    inp, out = rpdg.__getitem__()
+    '''
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+                logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            print(e)
+    '''
+    nmax = 1500
+    nmin = 50
+    dmax = 1*1/(nmin-1)
+    dmin = 0.5*1/(nmax-1)
+    dxrange = [dmin,dmax]
+    ndims = 2
+    grid_size_range = [[nmin,nmax] for _ in range(ndims)]
+    cmax = 10
+    cmin = 5
+    ctrl_pt_range = [[cmin,cmax] for _ in range(ndims)]
+    rpdg = reverse_poisson_dataset_generator(10,10,grid_size_range,ctrl_pt_range,dxrange,homogeneous_bc = True, stencil_size = 5,normalize_domain_size = True)
+    for k in range(10):
+        inp, out = rpdg.__getitem__()
+        print('---')
+        print('max soln val ' + str(tf.reduce_max(tf.abs(out))))
+        print('max soln val divided by no of pts ' + str(tf.reduce_max(tf.abs(out))/tf.reduce_prod(tf.cast(tf.shape(inp[0])[2:],tf.float32))))
+        print('max rhs val ' + str(tf.reduce_max(tf.abs(inp[0]))))
+        print('max rhs val divided by no of pts ' + str(tf.reduce_max(tf.abs(inp[0]))/tf.reduce_prod(tf.cast(tf.shape(inp[0])[2:],tf.float32))))
+        sisd = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),inp[0]) / tf.reduce_sum(1/(inp[-1]**2),1)
+        print('max rhs val divided by sum of inverse squares of dxes ' + str(sisd))
+        print('shape ' + str(tf.shape(inp[0])[2:]))
     import pdb
     pdb.set_trace()
+    '''
+    rpdg = reverse_poisson_dataset_generator(10,10,[[175,250],[100,150]],[[10,15],[10,15]],[1/249,1/99], homogeneous_bc = True, stencil_size = 5)
+    inp, out = rpdg.__getitem__()
+    '''
     

@@ -52,7 +52,7 @@ class metalearning_conv(tf.keras.models.Model):
         -padding_mode: str. see tf.nn.conv2d documentation.
         -constant_padding_value: float. determines the value to pad with if padding_mode is 'CONSTANT'
         -conv_activation: callable. activation function to be applied after the conv + bias_add ops.
-        -dimensions: int. number of spatial dimensions. must be 1,2 or 3. required only if it can't be inferred from filters.
+        -dimensions: int. number of spatial dimensions. must be 1,2 or 3. required only if it can't be inferred from kernel_size.
         -kernel_size, strides, padding, data_format, dilation_rate, use_bias, *_initializer, *_regularizer, *_constraint: see tf.keras.layers.Conv2D documentation
 
         '''
@@ -60,7 +60,7 @@ class metalearning_conv(tf.keras.models.Model):
         super().__init__(**kwargs)
         
         if dimensions is None:
-            self.dimensions = len(filters)
+            self.dimensions = len(kernel_size)
         else:
             self.dimensions = dimensions
         
