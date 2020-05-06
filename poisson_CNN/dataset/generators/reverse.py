@@ -72,7 +72,7 @@ def generate_random_grids(grid_size,k):
     return tf.map_fn(generate_single_random_grid, grid_sizes, back_prop = False, dtype = tf.keras.backend.floatx(), parallel_iterations = 32)
 
 class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
-    def __init__(self, batch_size, batches_per_epoch, output_size_range, control_pt_grid_size_range, grid_spacings_range = None, normalize_domain_size = False, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
+    def __init__(self, batch_size, batches_per_epoch, output_size_range, coeff_grid_size_range, grid_spacings_range = None, normalize_domain_size = False, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
         '''
         Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution and then using finite difference schemes to generate the RHS. Smooth results are ensured by generating random solutions on a low res control pt grid and then using cubic/bi-cubic/tri-cubic upsampling to the target resolution
 
@@ -92,7 +92,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         '''
         self.batch_size = batch_size
         if ndims is None:
-            for k in [output_size_range,control_pt_grid_size_range]:
+            for k in [output_size_range,coeff_grid_size_range]:
                 try:
                     ndims = len(k)
                 except:
@@ -102,7 +102,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         self.grid_spacings_range = handle_grid_parameters_range(grid_spacings_range, ndims)
         self.output_size_range = handle_grid_parameters_range(output_size_range, ndims)
-        self.control_pt_grid_size_range = handle_grid_parameters_range(control_pt_grid_size_range, ndims)
+        self.coeff_grid_size_range = handle_grid_parameters_range(coeff_grid_size_range, ndims)
 
         #build fd stencil
         self.stencil = tf.constant(build_fd_coefficients(stencil_size, 2, ndims), dtype=tf.keras.backend.floatx())
@@ -110,10 +110,6 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         
         #prepare padding variables if homogeneous bc is required
         self.homogeneous_bc = homogeneous_bc
-        if self.homogeneous_bc:
-            self._homogeneous_bc_control_pt_grid_paddings = tf.constant([[0,0],[0,0]] + [[1,1] for _ in range(ndims)], dtype=tf.int32)
-            soln_grid_padding_for_one_side = tf.constant([0,0] + list((tf.constant(self.stencil.shape[1:])//2).numpy()), dtype=tf.int32)
-            self._homogeneous_bc_soln_grid_paddings = tf.stack([soln_grid_padding_for_one_side, soln_grid_padding_for_one_side],1)
             
         #set max magnitude for outputs
         self.max_magnitude = max_magnitude
@@ -161,30 +157,23 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     @tf.function
     def adjust_grid_sizes_for_operator_application(self, grid_sizes):
         return grid_sizes + self._convolution_input_size_reduction_amount
-
-    @tf.function
-    def interpolate_control_pts_to_target_shape(self,control_pts,target_shape):
-        linspace_start = tf.cast(0.0,tf.keras.backend.floatx())
-        linspace_end = tf.cast(1.0,tf.keras.backend.floatx())
-        fine_grid_coords = tf.reshape(tf.stack(tf.meshgrid(*[tf.linspace(linspace_start,linspace_end,target_shape[k]) for k in range(self.ndims)], indexing='ij'),-1),[1,tf.reduce_prod(target_shape),self.ndims])
-        domain_lower_corner = tf.constant([[0.0 for k in range(self.ndims)]],dtype=tf.keras.backend.floatx())
-        domain_upper_corner = tf.constant([[1.0 for k in range(self.ndims)]],dtype=tf.keras.backend.floatx())
-        fine_grid_values = tfp.math.batch_interp_regular_nd_grid(fine_grid_coords,domain_lower_corner,domain_upper_corner,control_pts,-self.ndims)
-        return tf.reshape(fine_grid_values,tf.concat([tf.shape(control_pts)[:2],target_shape],0))
     
     @tf.function
     def generate_soln(self):
-        low_res_grid_sizes = self.generate_grid_sizes(self.control_pt_grid_size_range)
-        control_pts = tf.expand_dims(generate_random_grids(low_res_grid_sizes,self.batch_size),1)
-        if self.homogeneous_bc:#if homogeneous bcs are desired, after generating the control pt grid, pad it with 0s, upsample, pad again with 0s to the same shape the soln would have taken otherwise
-            control_pts = tf.pad(control_pts, self._homogeneous_bc_control_pt_grid_paddings, mode='CONSTANT', constant_values=0)
-            soln_grid_size = self.generate_grid_sizes(self.output_size_range)
-        else:
-            soln_grid_size = self.adjust_grid_sizes_for_operator_application(self.generate_grid_sizes(self.output_size_range))
-        soln_values = self.interpolate_control_pts_to_target_shape(control_pts,soln_grid_size)
-        if self.homogeneous_bc:
-            soln_values = tf.pad(soln_values, self._homogeneous_bc_soln_grid_paddings, mode='CONSTANT', constant_values = 0)
-        return soln_values
+        tiles = [self.batch_size] + [1 for _ in range(self.ndims)]
+
+        coeff_grid_size_range = tf.expand_dims(self.coeff_grid_size_range,0)
+        coeff_grid_size_range = tf.tile(coeff_grid_size_range,tiles)
+        n_coefficients = tf.map_fn(self.generate_grid_sizes,coeff_grid_size_range,dtype=tf.int32)
+
+        output_shape = self.generate_grid_sizes(self.output_size_range)
+        output_shape = tf.expand_dims(output_shape,0)
+        output_shape = tf.tile(output_shape,tiles[:2])
+
+        solns = tf.map_fn(lambda x: generate_smooth_function(x[0],x[1],self.homogeneous_bc),(output_shape,n_coefficients),dtype=tf.keras.backend.floatx())
+        
+        return tf.expand_dims(solns,1)
+        
 
     @tf.function
     def generate_rhses_from_solutions(self, solutions):
@@ -223,17 +212,6 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         return out
 
 if __name__=='__main__':
-    '''
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    if gpus:
-        try:
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-                logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-        except RuntimeError as e:
-            print(e)
-    '''
     nmax = 1500
     nmin = 50
     dmax = 1*1/(nmin-1)
