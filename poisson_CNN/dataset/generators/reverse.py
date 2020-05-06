@@ -62,19 +62,10 @@ def choose_conv_method(ndims):
     else:
         raise(NotImplementedError('Convolutions above 3D are not available yet'))
 
-@tf.function
-def generate_single_random_grid(*args):
-    return 2*tf.random.uniform(*args, dtype=tf.keras.backend.floatx())-1
-
-@tf.function
-def generate_random_grids(grid_size,k):
-    grid_sizes = tf.tile(tf.expand_dims(grid_size,0),[k,1])
-    return tf.map_fn(generate_single_random_grid, grid_sizes, back_prop = False, dtype = tf.keras.backend.floatx(), parallel_iterations = 32)
-
 class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     def __init__(self, batch_size, batches_per_epoch, output_size_range, coeff_grid_size_range, grid_spacings_range = None, normalize_domain_size = False, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
         '''
-        Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution and then using finite difference schemes to generate the RHS. Smooth results are ensured by generating random solutions on a low res control pt grid and then using cubic/bi-cubic/tri-cubic upsampling to the target resolution
+        Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution and then using finite difference schemes to generate the RHS. Smooth results are ensured by using a Fourier series approach.
 
         Inputs:
         -batch_size: int. Number of samples to generate each time __getitem__ is called
