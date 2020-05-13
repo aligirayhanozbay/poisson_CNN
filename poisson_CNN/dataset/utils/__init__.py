@@ -4,3 +4,5 @@ from .set_max_magnitude import set_max_magnitude, set_max_magnitude_in_batch
 from .poisson_lhs_matrix import poisson_lhs_matrix, tile_tensor_to_shape
 from .assign_to_tensor_index import assign_to_tensor_index
 from .generate_smooth_function import generate_smooth_function
+from .split_indices import split_indices
+from .equal_split_tensor_slice import equal_split_tensor_slice
