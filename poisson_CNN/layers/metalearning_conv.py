@@ -98,7 +98,6 @@ class metalearning_conv(tf.keras.models.Model):
                 self.padding_sizes.insert(1,[0,0])
             else:
                 self.padding_sizes.append([0,0])
-            print(self.padding_sizes)
         self.constant_padding_value = constant_padding_value
         
         self.kernel_shape = tf.concat([self.kernel_size,[self.previous_layer_filters],[self.filters]], axis = 0)

@@ -1,7 +1,6 @@
 import tensorflow as tf
 
-from .metalearning_conv import metalearning_conv
-from .metalearning_deconvupscale import metalearning_deconvupscale
+from ..layers import metalearning_conv
 
 class metalearning_resnet(tf.keras.models.Model):
     def __init__(self, previous_layer_filters, filters, kernel_size, **other_metalearning_conv_args):
@@ -12,4 +11,4 @@ class metalearning_resnet(tf.keras.models.Model):
 
     @tf.function
     def call(self, inp):
-        return inp[0] + self.conv1(self.conv0(inp))
+        return inp[0] + self.conv1([self.conv0(inp),inp[1]])
