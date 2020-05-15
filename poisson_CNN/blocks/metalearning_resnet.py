@@ -6,8 +6,9 @@ class metalearning_resnet(tf.keras.models.Model):
     def __init__(self, previous_layer_filters, filters, kernel_size, use_batchnorm = False, batchnorm_trainable = True, **other_metalearning_conv_args):
         super().__init__()
 
-        self.conv0 = metalearning_conv(previous_layer_filters, filters, kernel_size, padding = 'same', **other_metalearning_conv_args)
-        self.conv1 = metalearning_conv(previous_layer_filters, filters, kernel_size, padding = 'same', **other_metalearning_conv_args)
+        self.conv0 = metalearning_conv(previous_layer_filters, previous_layer_filters, kernel_size, padding = 'same', **other_metalearning_conv_args)
+        self.conv1 = metalearning_conv(previous_layer_filters, previous_layer_filters, kernel_size, padding = 'same', **other_metalearning_conv_args)
+        self.conv2 = metalearning_conv(previous_layer_filters, filters, kernel_size, padding = 'same', **other_metalearning_conv_args)
 
         self.use_batchnorm = use_batchnorm
         if self.use_batchnorm:
@@ -29,4 +30,6 @@ class metalearning_resnet(tf.keras.models.Model):
         out = self.conv1([out,inp[1]])
         if self.use_batchnorm:
             out = self.batchnorm1(out)
-        return tf.nn.leaky_relu(inp[0] + out)
+        out = inp[0] + out
+        out = self.conv2([out,inp[1]])
+        return out
