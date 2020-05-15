@@ -38,6 +38,22 @@ def convert_keras_dataformat_to_tf(df,ndims):
     else:
         raise(ValueError('Unrecognized data format - must be channels_first or channels_last'))
 
+def process_dilations_and_strides(dilations_or_strides,ndims,data_format):
+    if dilations_or_strides is None:
+        dilations_or_strides = [1 for _ in range(ndims + 2)]
+    else:
+        if isinstance(dilations_or_strides,int):
+            if data_format == 'channels_first':
+                dilations_or_strides = [1,1] + [dilations_or_strides for _ in range(ndims)]
+            else:
+                dilations_or_strides = [1] + [dilations_or_strides for _ in range(ndims)] + [1]
+        elif len(dilations_or_strides) == dimensions:
+            if data_format == 'channels_first':
+                dilations_or_strides = [1,1] + dilations_or_strides
+            else:
+                dilations_or_strides = [1] + dilations_or_strides + [1]
+    return dilations_or_strides
+    
 
 class metalearning_conv(tf.keras.models.Model):
     def __init__(self, previous_layer_filters, filters, kernel_size, strides=None, padding = 'valid', padding_mode = 'constant', constant_padding_value = 0.0, data_format = 'channels_first', dilation_rate = None, conv_activation = tf.keras.activations.linear, use_bias = True, kernel_initializer = None, bias_initializer = None, kernel_regularizer = None, bias_regularizer = None, activity_regularizer = None, kernel_constraint = None, bias_constraint = None, dimensions = None, dense_activations = tf.keras.activations.linear, pre_output_dense_units = [8,16], **kwargs):
@@ -69,20 +85,14 @@ class metalearning_conv(tf.keras.models.Model):
         else:
             self.kernel_size = kernel_size
 
-        if dilation_rate is None:
-            self.dilation_rate = [1 for _ in range(self.dimensions)]
-        else:
-            self.dilation_rate = dilation_rate
-
-        if strides is None:
-            self.strides = [1 for _ in range(self.dimensions)]
-        else:
-            self.strides = strides
-
-        self.conv_activation = conv_activation
-        
         self.data_format = data_format
         self._tf_data_format = convert_keras_dataformat_to_tf(self.data_format, self.dimensions)
+
+        self.dilation_rate = process_dilations_and_strides(dilation_rate,self.dimensions,self.data_format)
+
+        self.strides = process_dilations_and_strides(strides,self.dimensions,self.data_format)
+
+        self.conv_activation = conv_activation
         
         self.filters = filters
         self.previous_layer_filters = previous_layer_filters
@@ -111,7 +121,7 @@ class metalearning_conv(tf.keras.models.Model):
         self.dense_layers = [tf.keras.layers.Dense(pre_output_dense_units[k], activation = dense_activations[k], **dense_layer_args) for k in range(len(pre_output_dense_units))] + [tf.keras.layers.Dense(tf.reduce_prod(self.kernel_shape)+self.bias_shape, activation = dense_activations[-1], **dense_layer_args)]
 
         if self.dimensions == 1:
-            self.conv_method = lambda *args, **kwargs: tf.nn.conv1d(*args, strides = self.strides, dilations = self.dilation_rate, **kwargs)
+            self.conv_method = lambda *args, **kwargs: tf.nn.conv1d(*args, stride = self.strides, dilations = self.dilation_rate, **kwargs)
         elif self.dimensions == 2:
             self.conv_method = lambda *args, **kwargs: tf.nn.conv2d(*args, strides = self.strides, dilations = self.dilation_rate, **kwargs)
         elif self.dimensions == 3:
@@ -158,8 +168,8 @@ class metalearning_conv(tf.keras.models.Model):
         return self.conv_activation(output)
 
 if __name__ == '__main__':
-    mod = metalearning_conv(2, 5, 5, conv_activation = tf.nn.relu, dimensions = 2, data_format = 'channels_first', padding='same', padding_mode='SYMMETRIC', use_bias = True)
-    convinp = tf.random.uniform((10,2,100,100))
+    mod = metalearning_conv(2, 5, 5, conv_activation = tf.nn.relu, dimensions = 3, data_format = 'channels_first', padding='same', padding_mode='SYMMETRIC', use_bias = True)
+    convinp = tf.random.uniform((10,2,100,100,100))
     denseinp = 2*tf.random.uniform((10,5))-1
 
     #print(mod([convinp,denseinp]))

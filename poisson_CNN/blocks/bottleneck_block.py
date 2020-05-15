@@ -57,7 +57,7 @@ class bottleneck_block(tf.keras.models.Model):
 
         self.conv_layers = []
             
-        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias}
+        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias, 'use_batchnorm': use_batchnorm}
 
         self.downsampling_method = downsampling_method
         if downsampling_method == 'conv':
@@ -77,6 +77,8 @@ class bottleneck_block(tf.keras.models.Model):
 
         if use_resnet:
             del conv_input_args['padding']
+        else:
+            del conv_input_args['use_batchnorm']
 
         conv_layer = metalearning_resnet if use_resnet else metalearning_conv
             
@@ -135,7 +137,8 @@ if __name__ == '__main__':
     conv_padding_mode = 'SYMMETRIC'
     conv_activations = tf.nn.leaky_relu
     dense_activations = tf.nn.leaky_relu
-    mod = bottleneck_block(ndims,downsampling_factor,n_prevch,n_postch,conv_ksize,deconv_ksize,n_convs = n_convs, conv_padding_mode = conv_padding_mode,conv_conv_activation = conv_activations, conv_dense_activation = dense_activations,use_resnet = True,data_format = 'channels_first',upsampling_factor = upsampling_factor)
+    use_batchnorm = True
+    mod = bottleneck_block(ndims,downsampling_factor,n_prevch,n_postch,conv_ksize,deconv_ksize,n_convs = n_convs, conv_padding_mode = conv_padding_mode,conv_conv_activation = conv_activations, conv_dense_activation = dense_activations,use_resnet = True,data_format = 'channels_first',upsampling_factor = upsampling_factor, use_batchnorm = use_batchnorm)
     res = mod([conv_inp,dense_inp])
     print(res.shape)
     import time
