@@ -13,6 +13,17 @@ def get_init_arguments_from_config(cfg,k,fields_in_cfg,fields_in_args):
     
     return args
 
+class metalearning_conv_and_batchnorm(tf.keras.models.Model):
+    def __init__(self,conv,batchnorm):
+        super().__init__()
+        self.conv = conv
+        self.batchnorm = batchnorm
+
+    @tf.function
+    def call(self,inp):
+        out = self.conv(inp)
+        out = self.batchnorm(out)
+        return out
     
 
 class Homogeneous_Poisson_NN(tf.keras.models.Model):
@@ -42,9 +53,13 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         for k in range(len(pre_bottleneck_convolutions_config['filters'])):#
             conv_args = get_init_arguments_from_config(pre_bottleneck_convolutions_config,k,fields_in_conv_cfg,fields_in_conv_args)
             conv = metalearning_conv(previous_layer_filters = prev_layer_filters_initialconv[k], data_format = data_format, dimensions = ndims, padding = 'same', **conv_args)
-            self.pre_bottleneck_convolutions.append(conv)
+            #self.pre_bottleneck_convolutions.append(conv)
             if self.use_batchnorm:
-                self.pre_bottleneck_convolutions.append(tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1))
+                bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1)
+                block = metalearning_conv_and_batchnorm(conv,bnorm)
+                self.pre_bottleneck_convolutions.append(block)
+            else:
+                self.pre_bottleneck_convolutions.append(conv)
 
         if bottleneck_config is None:
             n_bottleneck_layers = 6
@@ -85,7 +100,6 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
                 }
         self.final_convolutions = []
         prev_layer_filters_finalconv = [bottleneck_config['filters']] + final_convolutions_config['filters'][:-1]
-        print(prev_layer_filters_finalconv)
         final_convolution_stages = len(final_convolutions_config['filters'])
         for k in range(final_convolution_stages-2):
             conv_args = get_init_arguments_from_config(final_convolutions_config,k,fields_in_conv_cfg,fields_in_conv_args)
@@ -117,7 +131,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         
         
 if __name__ == '__main__':
-    mod = Homogeneous_Poisson_NN(2, use_batchnorm = False)
+    mod = Homogeneous_Poisson_NN(2, use_batchnorm = True)
     convinp = 2*tf.random.uniform((1,1,500,500))-1
     denseinp = tf.random.uniform((1,6))
 
@@ -129,6 +143,12 @@ if __name__ == '__main__':
         print(mod([convinp,denseinp]).shape)
     t1 = time.time()
     print((t1-t0)/ntrials)
+
+    with tf.GradientTape() as tape:
+        tape.watch(mod.trainable_variables)
+        out = mod([convinp,denseinp])
+    grads = tape.gradient(out,mod.trainable_variables)
+    
     import pdb
     pdb.set_trace()
         
