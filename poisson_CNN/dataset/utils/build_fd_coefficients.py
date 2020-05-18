@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from .get_fd_coefficients import get_fd_coefficients
 
 def build_fd_coefficients(stencil_size, orders, ndims = None):
     #handle orders input argument

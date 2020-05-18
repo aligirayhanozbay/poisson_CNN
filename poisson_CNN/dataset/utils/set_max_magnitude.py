@@ -1,4 +1,5 @@
 import tensorflow as tf
+import multiprocessing
 
 @tf.function
 def set_max_magnitude(arr, max_magnitude = None, return_scaling_factors = False):
@@ -29,4 +30,4 @@ def set_max_magnitude_in_batch(arr, max_magnitude, return_scaling_factors = Fals
     else:
         return_dtype = arr.dtype
 
-    return tf.map_fn(lambda x: set_max_magnitude(x, return_scaling_factors = return_scaling_factors), (arr, max_magnitude), dtype = return_dtype, parallel_iterations = multiprocessing.cpu_count())
+    return tf.map_fn(lambda x: set_max_magnitude(x, return_scaling_factors = return_scaling_factors), (arr, max_magnitude), dtype = return_dtype, parallel_iterations = multiprocessing.cpu_count()-2)
