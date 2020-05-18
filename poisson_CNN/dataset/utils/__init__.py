@@ -6,3 +6,4 @@ from .assign_to_tensor_index import assign_to_tensor_index
 from .generate_smooth_function import generate_smooth_function
 from .split_indices import split_indices
 from .equal_split_tensor_slice import equal_split_tensor_slice
+from .build_fd_coefficients import build_fd_coefficients

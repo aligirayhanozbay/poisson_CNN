@@ -102,7 +102,7 @@ def polynomials_and_their_2nd_derivatives(npts, poly_deg, domain_sizes, batch_si
     return p,ddp
 
 class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
-    def __init__(self, batch_size, batches_per_epoch, output_size_range, fourier_coeff_grid_size_range, taylor_degree_range, grid_spacings_range = None, normalize_domain_size = False, ndims = None, stencil_size = 5, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
+    def __init__(self, batch_size, batches_per_epoch, output_size_range, fourier_coeff_grid_size_range, taylor_degree_range, grid_spacings_range = None, normalize_domain_size = False, ndims = None, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, max_magnitude = 1.0):
         '''
         Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution and then using finite difference schemes to generate the RHS. Smooth results are ensured by using a Fourier series approach.
 
@@ -130,6 +130,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
                     pass
         self.ndims = ndims
         self.batches_per_epoch = batches_per_epoch
+        self.homogeneous_bc = homogeneous_bc
 
         self.grid_spacings_range = handle_grid_parameters_range(grid_spacings_range, ndims)
         self.output_size_range = handle_grid_parameters_range(output_size_range, ndims)
@@ -138,26 +139,11 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         self.taylor_degree_range = handle_grid_parameters_range(taylor_degree_range, ndims)
         self.taylor_einsum_str = 'B' + ',B'.join(list(string.ascii_lowercase[-self.ndims:])) + '->B' + string.ascii_lowercase[-self.ndims:]
 
-        #build fd stencil
-        self.stencil = tf.constant(build_fd_coefficients(stencil_size, 2, ndims), dtype=tf.keras.backend.floatx())
-        self._convolution_input_size_reduction_amount = (tf.constant(self.stencil.shape[1:])//2)*2 #convolving an input with the stencil would reduce the input shape of spatial dimensions by the amounts stored in this variable
-        
-        #prepare padding variables if homogeneous bc is required
-        self.homogeneous_bc = homogeneous_bc
-        if self.homogeneous_bc:
-            self._homogeneous_bc_control_pt_grid_paddings = tf.constant([[0,0],[0,0]] + [[1,1] for _ in range(ndims)], dtype=tf.int32)
-            soln_grid_padding_for_one_side = tf.constant([0,0] + list((tf.constant(self.stencil.shape[1:])//2).numpy()), dtype=tf.int32)
-            self._homogeneous_bc_soln_grid_paddings = tf.stack([soln_grid_padding_for_one_side, soln_grid_padding_for_one_side],1)
-
-            
         #set max magnitude for outputs
         self.max_magnitude = max_magnitude
 
         #set correct conv method to use when building rhs from solution
         self.conv_method = choose_conv_method(ndims)
-
-        #build slice objects to recover solutions and BCs
-        self._soln_slice = [Ellipsis] + [slice(int(self._convolution_input_size_reduction_amount[k]/2),-int(self._convolution_input_size_reduction_amount[k]/2)) for k in range(int(self._convolution_input_size_reduction_amount.shape[0]))]
 
         self.return_rhses = return_rhses
 
@@ -322,12 +308,14 @@ if __name__=='__main__':
     cmin = 5
     ctrl_pt_range = [[cmin,cmax] for _ in range(ndims)]
     hbc = True
-    rpdg = reverse_poisson_dataset_generator(10,10,grid_size_range,ctrl_pt_range,ctrl_pt_range,grid_spacings_range=dxrange,homogeneous_bc = hbc, stencil_size = 5,normalize_domain_size = False)
+    rpdg = reverse_poisson_dataset_generator(10,10,grid_size_range,ctrl_pt_range,ctrl_pt_range,grid_spacings_range=dxrange,homogeneous_bc = hbc, normalize_domain_size = False)
     inp, out = rpdg.__getitem__()
 
+    stencil_size = 5
+    stencil = tf.constant(build_fd_coefficients(stencil_size, 2, ndims), dtype=tf.keras.backend.floatx())
     rhs = inp[0]
     soln = out
-    kernel = tf.einsum('i...,bi->b...',rpdg.stencil,1/(inp[-1]**2))
+    kernel = tf.einsum('i...,bi->b...',stencil,1/(inp[-1]**2))
     kernel = tf.reshape(kernel,tf.unstack(tf.shape(kernel)) + [1,1])
     rhs_computed = tf.map_fn(lambda x:tf.keras.backend.conv2d(tf.expand_dims(x[0],0),x[1],data_format='channels_first'), (soln,kernel), dtype=soln.dtype)[:,0,...]
     sl = [Ellipsis] + [slice(k//2,-(k//2)) for k in tf.shape(kernel)[1:3]]
