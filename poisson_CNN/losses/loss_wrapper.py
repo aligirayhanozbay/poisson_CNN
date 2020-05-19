@@ -21,4 +21,9 @@ class loss_wrapper:
 
     @tf.function
     def __call__(self,y_true,y_pred):
-        pass
+        soln_pred, rhs, dx = y_pred
+
+        loss = self.physics_informed_loss_weight * self.physics_informed_loss(rhs,soln_pred,dx)
+        loss += self.integral_loss_weight * self.integral_loss(y_true,soln_pred)
+
+        return loss

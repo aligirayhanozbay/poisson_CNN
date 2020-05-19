@@ -22,7 +22,7 @@ class linear_operator_loss:
         if self.normalize:
             self.mse = lambda y_true,y_pred: (y_true-y_pred)**2
         else:
-            self.mse = tf.keras.losses.MeanSquaredError
+            self.mse = tf.keras.losses.MeanSquaredError()
 
     def get_rhs_indices(self, rhs_shape):
         lower = tf.convert_to_tensor(self.stencil.shape[1:])//2
@@ -40,9 +40,9 @@ class linear_operator_loss:
         rhs_computed = tf.map_fn(lambda x: self.conv_method(tf.expand_dims(x[0],0),x[1],data_format=self.data_format), (solution,kernels), dtype=tf.keras.backend.floatx())[:,0,...]
         if self.normalize:
             max_rhs_magnitudes = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhs)
-            squared_error = (rhs[self.get_rhs_indices(tf.shape(rhs))]-rhs_computed)**2
+            squared_error = self.mse(rhs[self.get_rhs_indices(tf.shape(rhs))],rhs_computed)
             squared_error_normalized = tf.einsum('i...,i->i...', squared_error, 1/max_rhs_magnitudes**2)
-            return tf.reduce_mean(self.mse(rhs_computed, rhs[self.get_rhs_indices(tf.shape(rhs))]))
+            return tf.reduce_mean(squared_error_normalized)
         else:
             return self.mse(rhs[self.get_rhs_indices(tf.shape(rhs))],rhs_computed)
         
