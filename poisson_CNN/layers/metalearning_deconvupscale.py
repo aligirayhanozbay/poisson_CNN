@@ -118,7 +118,7 @@ class metalearning_deconvupscale(tf.keras.models.Model):
         for layer in self.dense_layers[1:]:
             conv_kernel_and_bias = layer(conv_kernel_and_bias)
 
-        conv_kernel = tf.reshape(conv_kernel_and_bias[:,:tf.reduce_prod(self.kernel_shape)],tf.concat([[conv_kernel_and_bias.shape[0]],self.kernel_shape], axis = 0))
+        conv_kernel = tf.reshape(conv_kernel_and_bias[:,:tf.reduce_prod(self.kernel_shape)],tf.concat([[-1],self.kernel_shape], axis = 0))
         
         #perform the convolution and bias addition, apply activation and return
         if self.use_bias:

@@ -56,7 +56,7 @@ def get_peak_magnitudes_in_each_sample(batch):
     return tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)), batch)
 
 class Homogeneous_Poisson_NN(tf.keras.models.Model):
-    def __init__(self, ndims, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_config = None, use_batchnorm = False, input_normalization = None, output_scaling = None):
+    def __init__(self, ndims, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_config = None, use_batchnorm = False, input_normalization = None, output_scaling = None, train_mode = False):
 
         super().__init__()
 
@@ -70,6 +70,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         
         self.use_batchnorm = use_batchnorm
         self.data_format = data_format
+        self.train_mode = train_mode
 
         if pre_bottleneck_convolutions_config is None:
             pre_bottleneck_convolutions_config= {
@@ -151,18 +152,18 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
     def compute_domain_sizes(self, dx, domain_shape):
         domain_sizes = tf.einsum('ij,j->ij', dx, tf.cast(domain_shape-1,dx.dtype))
         return domain_sizes
-
+    '''
     @tf.function
     def rhs_max_magnitude_input_normalization(self,rhses):
         rhses, scaling_factors = set_max_magnitude_in_batch(rhses,self.input_normalization['rhs_max_magnitude'],return_scaling_factors = True)
         return rhses, scaling_factors
+    '''
 
     @tf.function
     def normalize_inputs(self, rhses, dx):
-        scaling_factors = tf.ones(rhses.shape[0], dtype=rhses.dtype)
         if self.input_normalization['rhs_max_magnitude'] != False:
-            rhses, scaling_factors_rhs_max_magnitude = self.rhs_max_magnitude_input_normalization(rhses)
-            scaling_factors *= scaling_factors_rhs_max_magnitude
+            rhses, scaling_factors = set_max_magnitude_in_batch(rhses,1.0,return_scaling_factors = True)
+            #rhses, scaling_factors = self.rhs_max_magnitude_input_normalization(rhses)
         return rhses, scaling_factors
 
     @tf.function
@@ -184,10 +185,10 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         return rhs_peak_magnitudes/rhs_computed_peak_magnitudes
 
     @tf.function
-    def scale_outputs(self, conv_inp, output, max_domain_sizes, grid_spacings, input_normalization_factors = None):
+    def scale_outputs(self, conv_inp, output, max_domain_sizes, grid_spacings):#, input_normalization_factors = None):
         scaling_factors = []
-        if input_normalization_factors is not None:
-            scaling_factors.append(1/input_normalization_factors)
+        #if input_normalization_factors is not None:
+        #    scaling_factors.append(1/input_normalization_factors)
         if self.output_scaling['match_peak_laplacian_magnitude_to_peak_rhs'] is False:
             if self.output_scaling['rhs_max_magnitude']:
                 scaling_factors.append(self.rhs_max_magnitude_scaling(conv_inp))
@@ -213,13 +214,14 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         max_domain_sizes = tf.reduce_max(domain_sizes,1)
 
         dense_inp = tf.concat([dx/domain_sizes,tf.einsum('ij,i->ij',domain_sizes,1/max_domain_sizes)],1)
-
+        conv_inp = rhses
+        '''
         if self._input_normalization_has_to_be_performed:
             conv_inp, input_normalization_factors = self.normalize_inputs(rhses, dx)
         else:
             conv_inp = rhses
             input_normalization_factors = tf.ones((rhses.shape[0],),dtype=tf.keras.backend.floatx())
-
+        '''
         initial_conv_result = self.pre_bottleneck_convolutions[0]([conv_inp,dense_inp])
         for layer in self.pre_bottleneck_convolutions[1:]:
             initial_conv_result = layer([initial_conv_result, dense_inp])
@@ -233,8 +235,11 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
             out = layer([out,dense_inp])
 
         if self._output_scaling_has_to_be_performed:
-            out = self.scale_outputs(conv_inp,out,max_domain_sizes,dx,input_normalization_factors)
+            out = self.scale_outputs(conv_inp,out,max_domain_sizes,dx)#,input_normalization_factors)
 
+        #if self.train_mode:
+        #    return rhses, out, dx
+        #else:
         return out
         
         

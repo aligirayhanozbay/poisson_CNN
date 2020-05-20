@@ -84,7 +84,7 @@ class integral_loss:
         if ndims is None:
             ndims = len(n_quadpts)
         if isinstance(n_quadpts, int):
-            n_quadpts = (n_quadpts for _ in range(ndims))
+            n_quadpts = [n_quadpts for _ in range(ndims)]
         self.n_quadpts = n_quadpts
         self.ndims = ndims
         self.Lp_norm_power = Lp_norm_power
