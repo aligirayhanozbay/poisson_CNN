@@ -41,7 +41,7 @@ def process_normalizations(normalizations):
             if key not in normalizations:
                 normalizations[key] = default_val
         if isinstance(normalizations['rhs_max_magnitude'],bool) and normalizations['rhs_max_magnitude']:
-            normalizations['rhs_max_magnitude'] = 1.0
+            normalizations['rhs_max_magnitude'] = tf.constant(1.0)
     return normalizations
         
 
@@ -147,14 +147,14 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     def __len__(self):
         return self.batches_per_epoch
 
-    @tf.function
+    #@tf.function
     def generate_grid_spacings(self):
         #grid spacings shape: (batch_size, ndims)
         grid_spacings = tf.random.uniform((self.batch_size, self.ndims), dtype = tf.keras.backend.floatx())
         grid_spacings = tf.einsum('ij,j->ij', grid_spacings, self.grid_spacings_range[:,1] - self.grid_spacings_range[:,0]) + self.grid_spacings_range[:,0]
         return grid_spacings
 
-    @tf.function
+    #@tf.function
     def generate_grid_sizes(self, grid_size_range):
         #grid sizes shape: (ndims,)
         grid_sizes = tf.random.uniform((self.ndims,), dtype = tf.keras.backend.floatx())
@@ -162,7 +162,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         grid_sizes = tf.cast(grid_sizes, tf.int32)
         return grid_sizes
     
-    @tf.function
+    #@tf.function
     def generate_soln_fourier(self):
         tiles = [self.batch_size] + [1 for _ in range(self.ndims)]
 
@@ -181,7 +181,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         
         return tf.expand_dims(solns,1), coeffs
         
-    @tf.function
+    #@tf.function
     def generate_rhses_fourier(self, coefficients, grid_size):
         #adjust coefficients from generate_soln_fourier to get RHS coefficients
         grid_spacings = self.generate_grid_spacings()#pick a domain size for each sample
@@ -207,12 +207,12 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         return rhs, grid_spacings, domain_sizes
 
-    @tf.function
+    #@tf.function
     def build_taylor_rhs_component(self, vals, indices):
         vals = [vals[k][indices[k]] for k in range(self.ndims)]
         return tf.einsum(self.taylor_einsum_str,*vals)
         
-    @tf.function
+    #@tf.function
     def generate_soln_and_rhs_taylor(self, grid_size, domain_sizes):
         #generate polynomials and their 2nd derivatives along each direction
         polynomials = []
@@ -241,7 +241,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         
         return rhs, soln
     
-    @tf.function
+    #@tf.function
     def pack_outputs(self, rhses, solns, grid_spacings):
         #create output tuples according to configuration
         problem_definition = []
@@ -257,17 +257,17 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         return problem_definition, solns
 
-    @tf.function
+    #@tf.function
     def rhs_max_magnitude_normalization(self,rhses,solns):
         rhses, scaling_factors = set_max_magnitude_in_batch(rhses,self.normalizations['rhs_max_magnitude'],return_scaling_factors = True)
         return rhses, scaling_factors
 
-    @tf.function
+    #@tf.function
     def max_domain_size_squared_normalization(self,domain_sizes):
         scaling_factors = 1/tf.reduce_max(domain_sizes,1)**2
         return scaling_factors
 
-    @tf.function
+    #@tf.function
     def apply_normalization(self,rhses,solns,domain_sizes):
         soln_scaling_factors = tf.ones(solns.shape[0],dtype=tf.keras.backend.floatx())
         if (self.normalizations['rhs_max_magnitude'] != False):
@@ -279,7 +279,17 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         solns = tf.einsum('i,i...->i...', soln_scaling_factors, solns)
         return rhses, solns
 
-    @tf.function
+    #@tf.function
+    def set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(self,rhses_fourier, rhses_taylor, solns_taylor):
+        rhses_taylor_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_taylor)#scale taylor series component to that the max magnitude is identical to the fourier series component
+        rhses_fourier_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_fourier)
+        taylor_scaling_coeffs = rhses_fourier_max/rhses_taylor_max
+        rhses_taylor = tf.einsum('i,i...->i...',taylor_scaling_coeffs, rhses_taylor)
+        solns_taylor = tf.einsum('i,i...->i...',taylor_scaling_coeffs, solns_taylor)
+        return rhses_taylor, solns_taylor
+        
+
+    #@tf.function
     def __getitem__(self, idx = 0):
         #fourier component
         solns_fourier, soln_coeffs_fourier = self.generate_soln_fourier()
@@ -287,13 +297,8 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         #taylor series component
         rhses_taylor, solns_taylor = self.generate_soln_and_rhs_taylor(tf.shape(solns_fourier)[2:], domain_sizes)
+        rhses_taylor, solns_taylor = self.set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(rhses_fourier, rhses_taylor, solns_taylor)
         
-        rhses_taylor_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_taylor)#scale taylor series component to that the max magnitude is identical to the fourier series component
-        rhses_fourier_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_fourier)
-        taylor_scaling_coeffs = rhses_fourier_max/rhses_taylor_max
-        rhses_taylor = tf.einsum('i,i...->i...',taylor_scaling_coeffs, rhses_taylor)
-        solns_taylor = tf.einsum('i,i...->i...',taylor_scaling_coeffs, solns_taylor)
-
         #sum components
         solns = solns_fourier + solns_taylor
         rhses = rhses_fourier + rhses_taylor

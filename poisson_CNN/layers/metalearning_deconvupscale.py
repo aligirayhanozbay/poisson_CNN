@@ -37,7 +37,7 @@ def convolution_and_bias_add_closure(data_format, conv_method, use_bias, upsampl
     return upsample_with_batched_kernels
 
 
-class metalearning_deconvupscale(tf.keras.models.Model):
+class metalearning_deconvupscale(tf.keras.layers.Layer):
     def __init__(self, upsample_ratio, previous_layer_filters, filters, kernel_size, data_format = 'channels_first', conv_activation = tf.keras.activations.linear, use_bias = True, kernel_initializer = None, bias_initializer = None, kernel_regularizer = None, bias_regularizer = None, activity_regularizer = None, kernel_constraint = None, bias_constraint = None, dimensions = None, dense_activations = tf.keras.activations.linear, pre_output_dense_units = [8,16], **kwargs):
         '''
         An upsampling layer using a transposed convolution the kernel and bias of which is generated with a feedforward NN.

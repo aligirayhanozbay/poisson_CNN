@@ -56,7 +56,7 @@ def get_peak_magnitudes_in_each_sample(batch):
     return tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)), batch)
 
 class Homogeneous_Poisson_NN(tf.keras.models.Model):
-    def __init__(self, ndims, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_config = None, use_batchnorm = False, input_normalization = None, output_scaling = None, train_mode = False):
+    def __init__(self, ndims, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_config = None, use_batchnorm = False, input_normalization = None, output_scaling = None):
 
         super().__init__()
 
@@ -70,7 +70,6 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         
         self.use_batchnorm = use_batchnorm
         self.data_format = data_format
-        self.train_mode = train_mode
 
         if pre_bottleneck_convolutions_config is None:
             pre_bottleneck_convolutions_config= {
@@ -162,7 +161,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
     @tf.function
     def normalize_inputs(self, rhses, dx):
         if self.input_normalization['rhs_max_magnitude'] != False:
-            rhses, scaling_factors = set_max_magnitude_in_batch(rhses,1.0,return_scaling_factors = True)
+            rhses, scaling_factors = set_max_magnitude_in_batch(rhses,tf.constant(1.0),return_scaling_factors = tf.constant(True))
             #rhses, scaling_factors = self.rhs_max_magnitude_input_normalization(rhses)
         return rhses, scaling_factors
 
@@ -237,10 +236,32 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         if self._output_scaling_has_to_be_performed:
             out = self.scale_outputs(conv_inp,out,max_domain_sizes,dx)#,input_normalization_factors)
 
-        #if self.train_mode:
-        #    return rhses, out, dx
-        #else:
         return out
+
+    def train_step(self,data):
+
+        inputs, ground_truth = data
+
+        rhses, dx = inputs
+        
+
+        with tf.GradientTape() as tape:
+            tape.watch(self.trainable_variables)
+            pred = self(inputs)
+            loss = tf.reduce_mean(self.loss_fn(y_true=ground_truth,y_pred=pred,rhs=rhses,dx=dx))
+        grads = tape.gradient(loss,self.trainable_variables)
+        print(loss.shape)
+
+        self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
+
+        return {'loss' : loss, 'peak_rhs' : tf.reduce_max(tf.abs(rhses)), 'peak_soln': tf.reduce_max(tf.abs(ground_truth)), 'peak_pred':tf.reduce_max(tf.abs(pred))}
+
+    def compile(self, loss, optimizer):
+        super().compile()
+        self.optimizer = optimizer
+        self.loss_fn = loss
+
+        
         
         
 if __name__ == '__main__':

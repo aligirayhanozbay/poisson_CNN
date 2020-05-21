@@ -143,8 +143,9 @@ class integral_loss:
         interpolation_matrix = tf.map_fn(self.get_interpolation_matrix_row,corner_coords,dtype=corner_coords.dtype)
         interpolation_matrix = tf.transpose(interpolation_matrix,[2+k for k in range(self.ndims)] + [0,1])#interpolation LHS matrix
         interpolation_matrix = tf.expand_dims(tf.expand_dims(interpolation_matrix,0),0)
-        interpolation_matrix = tf.tile(interpolation_matrix,[y_true.shape[0]] + [1 for _ in interpolation_matrix.shape[1:]])
-
+        #interpolation_matrix = tf.tile(interpolation_matrix,[y_true.shape[0]] + [1 for _ in interpolation_matrix.shape[1:]])
+        interpolation_matrix = tf.keras.backend.tile(interpolation_matrix,[tf.keras.backend.shape(y_true)[0]] + [1 for _ in interpolation_matrix.shape[1:]])
+        
         #build RHS
         pointwise_loss = (y_true - y_pred)**self.Lp_norm_power
         pointwise_loss_values_surrounding_quadrature_points = tf.expand_dims(sample_values_enclosing_GL_quadrature_points_from_grid(*neighbouring_indices, grid=pointwise_loss, corner_labels=corner_labels, data_format=self.data_format),-1)

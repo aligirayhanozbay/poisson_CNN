@@ -57,7 +57,9 @@ class bottleneck_block(tf.keras.models.Model):
 
         self.conv_layers = []
             
-        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias, 'use_batchnorm': use_batchnorm}
+        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias}
+        if use_resnet:
+            conv_input_args['use_batchnorm'] = use_batchnorm
 
         self.downsampling_method = downsampling_method
         if downsampling_method == 'conv':
@@ -71,6 +73,8 @@ class bottleneck_block(tf.keras.models.Model):
             self.downsample_layer = get_pooling_method(pool_downsampling_method, ndims)(**downsampling_input_args)
             if previous_layer_filters != filters:
                 first_conv_layer_input_args = copy.deepcopy(conv_input_args)
+                if use_resnet:
+                    del first_conv_layer_input_args['use_batchnorm']
                 first_conv_layer_input_args['previous_layer_filters'] = previous_layer_filters
                 first_conv_layer = metalearning_conv(**first_conv_layer_input_args)
                 self.conv_layers.append(first_conv_layer)

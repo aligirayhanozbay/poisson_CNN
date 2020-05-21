@@ -18,8 +18,6 @@ parser.add_argument("--checkpoint_dir", type=str, help="Directory to save result
 
 args = parser.parse_args()
 
-#import pdb
-#pdb.set_trace()
 
 config = json.load(open(args.config))
 checkpoint_dir = args.checkpoint_dir
@@ -30,11 +28,19 @@ for key in config['model'].keys():
             if 'activation' in layer_config_key:
                 config['model'][key][layer_config_key] = eval(config['model'][key][layer_config_key])
 
-model = Homogeneous_Poisson_NN(train_mode = True, **config['model'])
+model = Homogeneous_Poisson_NN(**config['model'])
 optimizer = choose_optimizer(config['training']['optimizer'])(**config['training']['optimizer_parameters'])
 loss = loss_wrapper(**config['training']['loss_parameters'])
-model.compile(loss=loss,optimizer=optimizer)
 
 dataset = reverse_poisson_dataset_generator(**config['dataset'])
 
-model.fit(dataset,epochs=50)
+inp,_=dataset.__getitem__()
+out = model(inp)
+
+model.compile(loss=loss,optimizer=optimizer)
+cb = [
+    tf.keras.callbacks.ModelCheckpoint(checkpoint_dir + '/chkpt.checkpoint',save_weights_only=True,save_best_only=True,monitor = 'loss'),
+    tf.keras.callbacks.ReduceLROnPlateau(patience = 2,monitor='loss')
+]
+
+model.fit(dataset,epochs=50,callbacks = cb)

@@ -3,7 +3,7 @@ import tensorflow as tf
 from .physics_informed_loss import linear_operator_loss
 from .integral_loss import integral_loss
 
-class loss_wrapper(tf.keras.losses.Loss):
+class loss_wrapper:#(tf.keras.losses.Loss):
     def __init__(self, ndims, integral_loss_weight, integral_loss_config, physics_informed_loss_weight, physics_informed_loss_config, data_format = 'channels_first'):
         super().__init__()
         self.ndims = ndims
@@ -21,12 +21,10 @@ class loss_wrapper(tf.keras.losses.Loss):
         self.physics_informed_loss = linear_operator_loss(**physics_informed_loss_config)
 
     @tf.function
-    def call(self,y_true,y_pred):
-        print(y_pred)
-        soln_pred, rhs, dx = y_pred
+    def __call__(self,y_true,y_pred,rhs,dx):
 
-        loss = self.physics_informed_loss_weight * self.physics_informed_loss(rhs,soln_pred,dx)
-        loss += self.integral_loss_weight * self.integral_loss(y_true,soln_pred)
+        loss = self.physics_informed_loss_weight * self.physics_informed_loss(rhs,y_pred,dx)
+        loss += self.integral_loss_weight * self.integral_loss(y_true,y_pred)
 
         return loss
 
