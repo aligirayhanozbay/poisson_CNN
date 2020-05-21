@@ -43,4 +43,6 @@ cb = [
     tf.keras.callbacks.ReduceLROnPlateau(patience = 2,monitor='loss')
 ]
 
+model.summary()
+
 model.fit(dataset,epochs=50,callbacks = cb)

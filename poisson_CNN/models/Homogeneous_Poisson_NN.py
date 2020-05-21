@@ -39,6 +39,20 @@ def process_output_scaling_modes(output_scalings):
                 output_scalings[key] = default_val
     return output_scalings
 
+def process_regularizer_initializer_and_constraint_arguments(config_dict):
+    special_cases_initializer = ['he_normal', 'he_uniform', 'lecun_normal', 'lecun_uniform', 'ones', 'zeros']
+    special_cases_regularizer = ['l1', 'l2', 'l1_l2']
+    for key,val in zip(config_dict.keys(),config_dict.vals()):
+        if ('regularizer' in key):
+            if val not in special_cases_initializer:
+                config_dict[key] = eval(val)
+        elif ('initializer' in key):
+            if val not in special_cases_initializer:
+                config_dict[key] = eval(val)
+        elif ('constraint' in key):
+            config_dict[key] = eval(val)
+    
+
 class metalearning_conv_and_batchnorm(tf.keras.models.Model):
     def __init__(self,conv,batchnorm):
         super().__init__()
@@ -250,8 +264,10 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
             pred = self(inputs)
             loss = tf.reduce_mean(self.loss_fn(y_true=ground_truth,y_pred=pred,rhs=rhses,dx=dx))
         grads = tape.gradient(loss,self.trainable_variables)
-        print(loss.shape)
 
+        for k in range(len(grads)):
+            grads[k] = tf.clip_by_norm(grads[k],tf.constant(0.1))
+        
         self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
 
         return {'loss' : loss, 'peak_rhs' : tf.reduce_max(tf.abs(rhses)), 'peak_soln': tf.reduce_max(tf.abs(ground_truth)), 'peak_pred':tf.reduce_max(tf.abs(pred))}
