@@ -23,8 +23,11 @@ class loss_wrapper:#(tf.keras.losses.Loss):
     @tf.function
     def __call__(self,y_true,y_pred,rhs,dx):
 
-        loss = self.physics_informed_loss_weight * self.physics_informed_loss(rhs,y_pred,dx)
-        loss += self.integral_loss_weight * self.integral_loss(y_true,y_pred)
+        loss = 0.0
+        if self.physics_informed_loss_weight != 0.0:
+            pass#loss += self.physics_informed_loss_weight * self.physics_informed_loss(rhs,y_pred,dx)
+        if self.integral_loss_weight != 0.0:
+            loss += tf.reduce_mean(self.integral_loss_weight * self.integral_loss(y_true,y_pred))
 
         return loss
 

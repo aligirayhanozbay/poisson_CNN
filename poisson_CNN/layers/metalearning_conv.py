@@ -117,7 +117,7 @@ class metalearning_conv(tf.keras.layers.Layer):
             dense_activations = [dense_activations for _ in range(len(pre_output_dense_units)+1)]
 
         dense_layer_args = {'use_bias': use_bias, 'kernel_initializer': kernel_initializer, 'bias_initializer': bias_initializer, 'kernel_regularizer': kernel_regularizer, 'bias_regularizer': bias_regularizer, 'activity_regularizer': activity_regularizer, 'kernel_constraint': kernel_constraint, 'bias_constraint': bias_constraint}
-            
+
         self.dense_layers = [tf.keras.layers.Dense(pre_output_dense_units[k], activation = dense_activations[k], **dense_layer_args) for k in range(len(pre_output_dense_units))] + [tf.keras.layers.Dense(tf.reduce_prod(self.kernel_shape)+self.bias_shape, activation = dense_activations[-1], **dense_layer_args)]
 
         if self.dimensions == 1:
@@ -152,7 +152,7 @@ class metalearning_conv(tf.keras.layers.Layer):
         for layer in self.dense_layers[1:]:
             conv_kernel_and_bias = layer(conv_kernel_and_bias)
 
-        conv_kernel = tf.reshape(conv_kernel_and_bias[:,:tf.reduce_prod(self.kernel_shape)],tf.concat([[-1],self.kernel_shape], axis = 0))
+        conv_kernel = tf.reshape(conv_kernel_and_bias[:,:tf.reduce_prod(self.kernel_shape)],tf.concat([[-1],self.kernel_shape], axis = 0))#/tf.cast(tf.reduce_prod(self.kernel_shape),tf.keras.backend.floatx())
 
         #apply padding to the input
         if self.padding.upper() == 'SAME':
@@ -160,7 +160,7 @@ class metalearning_conv(tf.keras.layers.Layer):
 
         #perform the convolution and bias addition, apply activation and return
         if self.use_bias:
-            bias = conv_kernel_and_bias[:,-tf.squeeze(self.bias_shape):]
+            bias = conv_kernel_and_bias[:,-tf.squeeze(self.bias_shape):]#/tf.cast(tf.reduce_prod(self.bias_shape),tf.keras.backend.floatx())
             output = self.conv_method(conv_input, conv_kernel, bias)
         else:
             output = self.conv_method(conv_input, conv_kernel)

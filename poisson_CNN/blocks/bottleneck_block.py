@@ -57,7 +57,7 @@ class bottleneck_block(tf.keras.models.Model):
 
         self.conv_layers = []
             
-        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias}
+        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias, 'use_batchnorm': use_batchnorm}
         if use_resnet:
             conv_input_args['use_batchnorm'] = use_batchnorm
 
@@ -101,7 +101,7 @@ class bottleneck_block(tf.keras.models.Model):
     @tf.function
     def call(self,inp):
         conv_inp, dense_inp = inp
-
+        
         if self.downsampling_method == 'conv':
             out = self.downsample_layer([conv_inp,dense_inp])
         else:
@@ -109,7 +109,7 @@ class bottleneck_block(tf.keras.models.Model):
 
         for layer in self.conv_layers:
             out = layer([out,dense_inp])
-
+            
         if self.data_format == 'channels_first':
             inpshape = tf.shape(conv_inp)[2:]
             outshape = tf.cast((inpshape/self.downsampling_factor)*self.upsampling_factor,tf.int32)
@@ -119,10 +119,9 @@ class bottleneck_block(tf.keras.models.Model):
             outshape = tf.cast((inpshape/self.downsampling_factor)*self.upsampling_factor,tf.int32)
 
         out = self.upsample_layer([out,dense_inp,outshape])
-
+        out = tf.reshape(out,outshape)
         if self.use_batchnorm:
             out = self.batchnorm(out)
-
         return out
 
 if __name__ == '__main__':
@@ -130,8 +129,10 @@ if __name__ == '__main__':
     n_prevch = 2
     n_postch = 4
     bsize = 10
-    conv_inp = tf.random.uniform([bsize,n_prevch] + [2500 for _ in range(ndims)])
-    dense_inp = tf.random.uniform((10,10))
+    spatial_shape = [2500 for _ in range(ndims)]
+    n_dense_features = 10
+    conv_inp = tf.random.uniform([bsize,n_prevch] + spatial_shape)
+    dense_inp = tf.random.uniform((bsize,n_dense_features))
 
     downsampling_factor = [6,4]
     upsampling_factor = [3,3]
@@ -142,16 +143,48 @@ if __name__ == '__main__':
     conv_activations = tf.nn.leaky_relu
     dense_activations = tf.nn.leaky_relu
     use_batchnorm = True
-    mod = bottleneck_block(ndims,downsampling_factor,n_prevch,n_postch,conv_ksize,deconv_ksize,n_convs = n_convs, conv_padding_mode = conv_padding_mode,conv_conv_activation = conv_activations, conv_dense_activation = dense_activations,use_resnet = True,data_format = 'channels_first',upsampling_factor = upsampling_factor, use_batchnorm = use_batchnorm)
-    res = mod([conv_inp,dense_inp])
+    bot = bottleneck_block(ndims,downsampling_factor,n_prevch,n_postch,conv_ksize,deconv_ksize,n_convs = n_convs, conv_padding_mode = conv_padding_mode,conv_conv_activation = conv_activations, conv_dense_activation = dense_activations,use_resnet = True,data_format = 'channels_first',upsampling_factor = upsampling_factor, use_batchnorm = use_batchnorm)
+    
+
+    class dummy_data_generator(tf.keras.utils.Sequence):
+        def __init__(self,batch_size,n_prevch,n_postch,spatial_shape,downsampling_factor,upsampling_factor,n_dense_features):
+            self.inshape = tf.constant([batch_size,n_prevch] + spatial_shape)
+            self.outshape = tf.constant([batch_size,n_postch] + [int(spatial_shape[k]*upsampling_factor[k]/downsampling_factor[k]) for k in range(len(spatial_shape))])
+            self.dense_shape = tf.constant([batch_size,n_dense_features])
+        def __getitem__(self,idx=0):
+            return [tf.random.uniform(self.inshape),tf.random.uniform(self.dense_shape)], tf.random.uniform(self.outshape)
+        def __len__(self):
+            return 50
+
+    conv = metalearning_conv(previous_layer_filters=2,filters=2,kernel_size=3,padding='same',dimensions=ndims)
+    class dummy_model(tf.keras.models.Model):
+        def __init__(self,conv,bottleneck):
+            super().__init__()
+            self.conv = conv
+            self.bot = bottleneck
+        def call(self,inp):
+            ci,di = inp
+            out = self.conv([ci,di])
+            return self.bot([out,di])
+
+    dg = dummy_data_generator(bsize,n_prevch,n_postch,spatial_shape,downsampling_factor,upsampling_factor,n_dense_features)
+
+    mod = dummy_model(conv,bot)
+    mod.compile(loss='mse',optimizer=tf.keras.optimizers.Adam())
+    mod.fit(dg,epochs=5)
+            
+    
+    '''
+    res = bot([conv_inp,dense_inp])
     print(res.shape)
     import time
     t0 = time.time()
     ntrials = 50
     for k in range(ntrials):
-        print(mod([conv_inp,dense_inp]).shape)
+        print(bot([conv_inp,dense_inp]).shape)
     t1 = time.time()
     print((t1-t0)/ntrials)
+    '''
 
         
 

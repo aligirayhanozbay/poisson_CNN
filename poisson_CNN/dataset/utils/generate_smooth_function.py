@@ -2,7 +2,7 @@ import tensorflow as tf
 import string
 import math
 
-@tf.function
+@tf.function(experimental_relax_shapes=True)
 def generate_smooth_function(grid_size,coefficients_or_coefficients_size, homogeneous_bc = False, return_coefficients = False, normalize = False, coefficients_return_shape = None):
     '''
     Generates a smooth function sampled on a grid the size of which is given by grid_size.

@@ -4,27 +4,27 @@
 	"ndims":2,
 	"use_batchnorm":true,
 	"pre_bottleneck_convolutions_config":{
-            "filters": [4,8,16],
-            "kernel_sizes": [19,15,13],
+            "filters": [4,8],
+            "kernel_sizes": [19,15],
             "padding_mode": "SYMMETRIC",
             "conv_activation": "tf.nn.leaky_relu",
             "dense_activations": ["tanh","tanh","tanh"],
-            "use_bias": true,
+            "use_bias": false,
 	    "bias_initializer":"zeros",
             "pre_output_dense_units": [8,16]
 	},
 	"bottleneck_config":{
             "downsampling_factors": [1,2,3,4],
             "upsampling_factors": [1,2,3,4],
-            "filters": 16,
+            "filters": 8,
             "conv_kernel_sizes": [13,13,13,13],
-            "deconv_kernel_sizes": [3,7,7,7],
-            "n_convs": [2,2,2,2],
+            "deconv_kernel_sizes": [3,2,3,4],
+            "n_convs": [1,1,1,1],
             "conv_padding_mode": "SYMMETRIC",
             "conv_conv_activation": "tf.nn.leaky_relu",
             "conv_dense_activation": ["tanh","tanh","tanh"],
             "conv_pre_output_dense_units": [8,16],
-            "conv_use_bias": true,
+            "conv_use_bias": false,
 	    "conv_initializer_constraint_regularizer_options":{
 		"bias_initializer":"zeros"
 	    },
@@ -34,13 +34,13 @@
             "deconv_conv_activation": "tf.nn.leaky_relu",
             "deconv_dense_activation": ["tanh","tanh","tanh"],
             "deconv_pre_output_dense_units": [8,16],
-            "deconv_use_bias": true,
+            "deconv_use_bias": false,
             "use_resnet": true,
-            "conv_downsampling_kernel_sizes": [13,7,7,7]
+            "conv_downsampling_kernel_sizes": [3,2,3,4]
         },
 	"final_convolutions_config":{
-            "filters": [8,6,4,2,1],
-            "kernel_sizes": [5,5,5,3,1],
+            "filters": [4,4,4,2,1],
+            "kernel_sizes": [5,5,5,3,3],
             "padding_mode": "SYMMETRIC",
             "conv_activation": "tf.nn.leaky_relu",
             "dense_activations": ["tanh","tanh","tanh"],

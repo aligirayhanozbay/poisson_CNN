@@ -3,7 +3,7 @@ import copy
 
 from ..layers import metalearning_conv, metalearning_deconvupscale
 from ..blocks import bottleneck_block, metalearning_resnet
-from ..dataset.utils import set_max_magnitude_in_batch, build_fd_coefficients
+from ..dataset.utils import set_max_magnitude_in_batch_and_return_scaling_factors, build_fd_coefficients
 from ..dataset.generators.reverse import choose_conv_method
 
 def get_init_arguments_from_config(cfg,k,fields_in_cfg,fields_in_args):
@@ -42,9 +42,9 @@ def process_output_scaling_modes(output_scalings):
 def process_regularizer_initializer_and_constraint_arguments(config_dict):
     special_cases_initializer = ['he_normal', 'he_uniform', 'lecun_normal', 'lecun_uniform', 'ones', 'zeros']
     special_cases_regularizer = ['l1', 'l2', 'l1_l2']
-    for key,val in zip(config_dict.keys(),config_dict.vals()):
+    for key,val in zip(config_dict.keys(),config_dict.values()):
         if ('regularizer' in key):
-            if val not in special_cases_initializer:
+            if val not in special_cases_regularizer:
                 config_dict[key] = eval(val)
         elif ('initializer' in key):
             if val not in special_cases_initializer:
@@ -95,7 +95,8 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
                 'use_bias': True,
                 'pre_output_dense_units': [8,16]
                 }
-        
+
+        #process_regularizer_initializer_and_constraint_arguments(pre_bottleneck_convolutions_config)
 
         fields_in_conv_cfg = ['filters','kernel_sizes']
         fields_in_conv_args = ['filters', 'kernel_size']
@@ -105,12 +106,14 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
             conv_args = get_init_arguments_from_config(pre_bottleneck_convolutions_config,k,fields_in_conv_cfg,fields_in_conv_args)
             conv = metalearning_conv(previous_layer_filters = prev_layer_filters_initialconv[k], data_format = data_format, dimensions = ndims, padding = 'same', **conv_args)
             #self.pre_bottleneck_convolutions.append(conv)
+            #'''
             if self.use_batchnorm:
                 bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1)
                 block = metalearning_conv_and_batchnorm(conv,bnorm)
                 self.pre_bottleneck_convolutions.append(block)
             else:
                 self.pre_bottleneck_convolutions.append(conv)
+            #'''
 
         if bottleneck_config is None:
             n_bottleneck_layers = 6
@@ -133,7 +136,13 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
                 'use_resnet': True,
                 'conv_downsampling_kernel_sizes': [2**(k) for k in range(n_bottleneck_layers)],
             }
-        
+        '''
+        if "deconv_initializer_constraint_regularizer_options" in bottleneck_config:
+            process_regularizer_initializer_and_constraint_arguments(bottleneck_config["deconv_initializer_constraint_regularizer_options"])
+        if "conv_initializer_constraint_regularizer_options" in bottleneck_config:
+            process_regularizer_initializer_and_constraint_arguments(bottleneck_config["conv_initializer_constraint_regularizer_options"])
+        '''
+            
         fields_in_bottleneck_cfg = ['downsampling_factors', 'upsampling_factors', 'conv_kernel_sizes', 'deconv_kernel_sizes', 'n_convs', 'conv_downsampling_kernel_sizes']
         fields_in_bottleneck_args = ['downsampling_factor', 'upsampling_factor', 'conv_kernel_size', 'deconv_kernel_size', 'n_convs', 'conv_downsampling_kernel_size']
         prev_layer_filters_bottleneck = pre_bottleneck_convolutions_config['filters'][-1]
@@ -149,6 +158,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
                 'use_bias': True,
                 'pre_output_dense_units': [8,16]
                 }
+        #process_regularizer_initializer_and_constraint_arguments(final_convolutions_config)
         self.final_convolutions = []
         prev_layer_filters_finalconv = [bottleneck_config['filters']] + final_convolutions_config['filters'][:-1]
         final_convolution_stages = len(final_convolutions_config['filters'])
@@ -157,8 +167,14 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
             conv = metalearning_resnet(previous_layer_filters = prev_layer_filters_finalconv[k], use_batchnorm = self.use_batchnorm, data_format = data_format, dimensions = ndims, **conv_args)
             self.final_convolutions.append(conv)
         for k in range(final_convolution_stages-2,final_convolution_stages):
-            conv_args = get_init_arguments_from_config(final_convolutions_config,k,fields_in_conv_cfg,fields_in_conv_args)
-            conv = metalearning_conv(previous_layer_filters = prev_layer_filters_finalconv[k], data_format = data_format, dimensions = ndims, padding = 'same', **conv_args)
+            if ndims == 1:
+                conv = tf.keras.layers.Conv1D(filters = final_convolutions_config['filters'][k], kernel_size = final_convolutions_config['kernel_sizes'][k],activation = tf.keras.activations.linear, padding='same',data_format=self.data_format,use_bias=final_convolutions_config['use_bias'])
+            elif ndims == 2:
+                conv = tf.keras.layers.Conv2D(filters = final_convolutions_config['filters'][k], kernel_size = final_convolutions_config['kernel_sizes'][k],activation = tf.keras.activations.linear, padding='same',data_format=self.data_format,use_bias=final_convolutions_config['use_bias'])
+            elif ndims == 3:
+                conv = tf.keras.layers.Conv3D(filters = final_convolutions_config['filters'][k], kernel_size = final_convolutions_config['kernel_sizes'][k],activation = tf.keras.activations.linear, padding='same',data_format=self.data_format,use_bias=final_convolutions_config['use_bias'])
+            else:
+                raise(ValueError('ndims must be 1,2 or 3'))
             self.final_convolutions.append(conv)
 
     @tf.function
@@ -175,7 +191,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
     @tf.function
     def normalize_inputs(self, rhses, dx):
         if self.input_normalization['rhs_max_magnitude'] != False:
-            rhses, scaling_factors = set_max_magnitude_in_batch(rhses,tf.constant(1.0),return_scaling_factors = tf.constant(True))
+            rhses, scaling_factors = set_max_magnitude_in_batch_and_return_scaling_factors(rhses,tf.constant(1.0))
             #rhses, scaling_factors = self.rhs_max_magnitude_input_normalization(rhses)
         return rhses, scaling_factors
 
@@ -225,7 +241,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
 
         domain_sizes = self.compute_domain_sizes(dx, domain_shape)
         max_domain_sizes = tf.reduce_max(domain_sizes,1)
-
+        
         dense_inp = tf.concat([dx/domain_sizes,tf.einsum('ij,i->ij',domain_sizes,1/max_domain_sizes)],1)
         conv_inp = rhses
         '''
@@ -239,13 +255,16 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         for layer in self.pre_bottleneck_convolutions[1:]:
             initial_conv_result = layer([initial_conv_result, dense_inp])
 
+        #print(initial_conv_result.shape)
         bottleneck_result = self.bottleneck_blocks[0]([initial_conv_result,dense_inp])
         for layer in self.bottleneck_blocks[1:]:
             bottleneck_result = bottleneck_result + layer([initial_conv_result,dense_inp])
-
+            
         out = self.final_convolutions[0]([bottleneck_result, dense_inp])
-        for layer in self.final_convolutions[1:]:
+        for layer in self.final_convolutions[1:-2]:
             out = layer([out,dense_inp])
+        for layer in self.final_convolutions[-2:]:
+            out = layer(out)
 
         if self._output_scaling_has_to_be_performed:
             out = self.scale_outputs(conv_inp,out,max_domain_sizes,dx)#,input_normalization_factors)
@@ -257,20 +276,41 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         inputs, ground_truth = data
 
         rhses, dx = inputs
+
+        #rhses = tf.debugging.check_numerics(rhses, 'nan or inf in rhses. indices: ' + str(tf.where(tf.math.is_nan(rhses))))
+        #ground_truth = tf.debugging.check_numerics(ground_truth, 'nan or inf in ground truth')
+        #dx = tf.debugging.check_numerics(rhses, 'nan or inf in dxes')
         
 
         with tf.GradientTape() as tape:
             tape.watch(self.trainable_variables)
             pred = self(inputs)
-            loss = tf.reduce_mean(self.loss_fn(y_true=ground_truth,y_pred=pred,rhs=rhses,dx=dx))
+            #predk = tf.debugging.check_numerics(pred, 'nan or inf in pred')
+            loss = tf.reduce_mean((ground_truth - pred)**2)
+            #loss = tf.reduce_mean(self.loss_fn(y_true=ground_truth,y_pred=pred,rhs=rhses,dx=dx)) + tf.reduce_mean((ground_truth - pred)**2)
+        #lossk = tf.debugging.check_numerics(loss, 'nan or inf in loss')
         grads = tape.gradient(loss,self.trainable_variables)
-
+        '''
         for k in range(len(grads)):
-            grads[k] = tf.clip_by_norm(grads[k],tf.constant(0.1))
+            gradk = tf.debugging.check_numerics(grads[k], 'nan or inf in grad ' + str(k))
+            #grads[k] = tf.clip_by_norm(grads[k],tf.constant(0.5))
+        '''
+
+        grad_peak_log = tf.constant(-999.0)
+        for k in range(len(grads)):
+            peak_log = tf.math.log(tf.reduce_max(tf.abs(grads[k])))
+            if grad_peak_log < peak_log:
+                grad_peak_log = peak_log
         
         self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
 
-        return {'loss' : loss, 'peak_rhs' : tf.reduce_max(tf.abs(rhses)), 'peak_soln': tf.reduce_max(tf.abs(ground_truth)), 'peak_pred':tf.reduce_max(tf.abs(pred))}
+        model_peak_log = tf.constant(-999.0)
+        for variables in self.trainable_variables:
+            var_peak_log = tf.math.log(tf.reduce_max(tf.abs(variables)))
+            if model_peak_log < var_peak_log:
+                model_peak_log = var_peak_log
+
+        return {'loss' : loss, 'peak_rhs' : tf.reduce_max(tf.abs(rhses)), 'peak_soln': tf.reduce_max(tf.abs(ground_truth)), 'peak_pred':tf.reduce_max(tf.abs(pred)), 'model peak log' : model_peak_log, 'grad peak log' : grad_peak_log}
 
     def compile(self, loss, optimizer):
         super().compile()

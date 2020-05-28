@@ -47,15 +47,45 @@ def process_normalizations(normalizations):
 
 @tf.function
 def generate_polynomial_and_second_derivative(roots,degree,npts,domain_size):
-    clip_value = 1e-15 if tf.keras.backend.floatx() == tf.float64 else 1e-6
-    coords = tf.linspace(tf.constant(0.0+clip_value,dtype=tf.keras.backend.floatx()),domain_size+clip_value,npts)
+    dx = 1/(tf.cast(npts,domain_size.dtype)-1)
+    coords = tf.linspace(tf.constant(0.0,dtype=tf.keras.backend.floatx())-dx,1.0+dx,npts+2)#extra 2 points needed for numerical stability
+    
+    #'''
     coords_expanded = tf.expand_dims(coords,1)
     roots = tf.expand_dims(roots[:degree],0)
     factors = coords_expanded + roots
+    
     p = tf.reduce_prod(factors,1)
     dp = tf.gradients(p,coords)[0]
     ddp = tf.gradients(dp,coords)[0]
-    return p,ddp
+    
+    '''
+    import pdb
+    pdb.set_trace()
+    with tf.GradientTape() as tape1:
+        tape1.watch(coords)
+        with tf.GradientTape() as tape2:
+            tape2.watch(coords)
+            coords_expanded = tf.expand_dims(coords,1)
+            roots = tf.expand_dims(roots[:degree],0)
+            factors = coords_expanded + roots
+            p = tf.reduce_prod(factors,1)
+        dp = tape2.gradient(p,coords)
+    ddp = tape1.gradient(dp,coords)
+    '''
+    
+
+    nan_values = tf.math.is_nan(ddp)
+
+    if tf.reduce_any(nan_values):
+        interpolated_ddp = 0.5*(ddp[:-2] + ddp[2:])
+        nan_value_indices = tf.where(nan_values)
+        interpolated_values_to_replace_nans = tf.gather_nd(interpolated_ddp, nan_value_indices-1)
+        ddp = tf.tensor_scatter_nd_update(ddp, nan_value_indices, interpolated_values_to_replace_nans)
+
+    #ddp = tf.debugging.check_numerics(ddp, 'nan or inf in ddp')
+    
+    return p[1:-1],ddp[1:-1]
 
 @tf.function
 def batch_generate_polynomial_and_second_derivative(roots,degrees,npts,domain_size):
@@ -80,7 +110,7 @@ def polynomials_and_their_2nd_derivatives(npts, poly_deg, domain_sizes, batch_si
         roots = tf.concat([tf.zeros((batch_size,tf.shape(roots)[1],1),dtype=tf.keras.backend.floatx()),-tf.ones((batch_size,tf.shape(roots)[1],1),dtype=tf.keras.backend.floatx()),roots],-1)
     else:
         roots = -tf.random.uniform((batch_size,poly_deg,poly_deg+2),dtype=tf.keras.backend.floatx())
-    roots = tf.einsum('i,i...->i...',domain_sizes,roots)
+    #roots = tf.einsum('i,i...->i...',domain_sizes,roots)
     degrees = tf.tile(tf.expand_dims(tf.range(2,poly_deg+2),0),[batch_size,1])
     p,ddp = tf.map_fn(lambda x: batch_generate_polynomial_and_second_derivative(x[0],x[1],x[2],x[3]), (roots,degrees,npts,domain_sizes), dtype=(tf.keras.backend.floatx(),tf.keras.backend.floatx()))
     return p,ddp
@@ -147,14 +177,14 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     def __len__(self):
         return self.batches_per_epoch
 
-    #@tf.function
+    @tf.function
     def generate_grid_spacings(self):
         #grid spacings shape: (batch_size, ndims)
         grid_spacings = tf.random.uniform((self.batch_size, self.ndims), dtype = tf.keras.backend.floatx())
         grid_spacings = tf.einsum('ij,j->ij', grid_spacings, self.grid_spacings_range[:,1] - self.grid_spacings_range[:,0]) + self.grid_spacings_range[:,0]
         return grid_spacings
 
-    #@tf.function
+    @tf.function
     def generate_grid_sizes(self, grid_size_range):
         #grid sizes shape: (ndims,)
         grid_sizes = tf.random.uniform((self.ndims,), dtype = tf.keras.backend.floatx())
@@ -162,7 +192,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         grid_sizes = tf.cast(grid_sizes, tf.int32)
         return grid_sizes
     
-    #@tf.function
+    @tf.function
     def generate_soln_fourier(self):
         tiles = [self.batch_size] + [1 for _ in range(self.ndims)]
 
@@ -181,7 +211,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         
         return tf.expand_dims(solns,1), coeffs
         
-    #@tf.function
+    @tf.function
     def generate_rhses_fourier(self, coefficients, grid_size):
         #adjust coefficients from generate_soln_fourier to get RHS coefficients
         grid_spacings = self.generate_grid_spacings()#pick a domain size for each sample
@@ -207,12 +237,12 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         return rhs, grid_spacings, domain_sizes
 
-    #@tf.function
+    @tf.function
     def build_taylor_rhs_component(self, vals, indices):
         vals = [vals[k][indices[k]] for k in range(self.ndims)]
         return tf.einsum(self.taylor_einsum_str,*vals)
         
-    #@tf.function
+    @tf.function
     def generate_soln_and_rhs_taylor(self, grid_size, domain_sizes):
         #generate polynomials and their 2nd derivatives along each direction
         polynomials = []
@@ -259,7 +289,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
     #@tf.function
     def rhs_max_magnitude_normalization(self,rhses,solns):
-        rhses, scaling_factors = set_max_magnitude_in_batch(rhses,self.normalizations['rhs_max_magnitude'],return_scaling_factors = True)
+        rhses, scaling_factors = set_max_magnitude_in_batch_and_return_scaling_factors(rhses,self.normalizations['rhs_max_magnitude'])
         return rhses, scaling_factors
 
     #@tf.function

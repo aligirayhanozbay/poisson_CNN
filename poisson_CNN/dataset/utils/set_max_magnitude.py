@@ -1,21 +1,17 @@
 import tensorflow as tf
-import multiprocessing
 
 @tf.function(experimental_relax_shapes=True)
-def set_max_magnitude(arr, return_scaling_factors = False):
+def set_max_magnitude(arr):
     '''
     Helper method to set the max magnitude in an array
     '''
     arr,max_magnitude = arr
         
     scaling_factor = max_magnitude/tf.reduce_max(tf.abs(arr))
-    if return_scaling_factors:
-        return arr * scaling_factor, scaling_factor
-    else:
-        return arr * scaling_factor
+    return arr * scaling_factor
     
 @tf.function(experimental_relax_shapes=True)
-def set_max_magnitude_in_batch(arr, max_magnitude, return_scaling_factors = tf.constant(False)):
+def set_max_magnitude_in_batch(arr, max_magnitude):
     '''
     Set max magnitudes within each batch
     '''
@@ -24,9 +20,31 @@ def set_max_magnitude_in_batch(arr, max_magnitude, return_scaling_factors = tf.c
     elif tf.size(max_magnitude) == 1:
         max_magnitude = tf.keras.backend.tile(tf.reshape(max_magnitude,[1]), [tf.shape(arr)[0]])
 
-    if return_scaling_factors == True:
-        return_dtype = (arr.dtype, arr.dtype)
-    else:
-        return_dtype = arr.dtype
+    return_dtype = arr.dtype
 
-    return tf.map_fn(lambda x: set_max_magnitude(x, return_scaling_factors = return_scaling_factors), (arr, max_magnitude), dtype = return_dtype)
+    return tf.map_fn(set_max_magnitude, (arr, max_magnitude), dtype = return_dtype)
+
+#@tf.function(experimental_relax_shapes=True)
+def set_max_magnitude_and_return_scaling_factors(arr):
+    '''
+    Helper method to set the max magnitude in an array
+    '''
+    arr,max_magnitude = arr
+        
+    scaling_factor = max_magnitude/tf.reduce_max(tf.abs(arr))
+    return arr * scaling_factor, scaling_factor
+
+
+#@tf.function(experimental_relax_shapes=True)
+def set_max_magnitude_in_batch_and_return_scaling_factors(arr, max_magnitude):
+    '''
+    Set max magnitudes within each batch
+    '''
+    if isinstance(max_magnitude, float):
+        max_magnitude = tf.cast(tf.keras.backend.tile(tf.constant([max_magnitude]), [tf.shape(arr)[0]]), arr.dtype)
+    elif tf.size(max_magnitude) == 1:
+        max_magnitude = tf.keras.backend.tile(tf.reshape(max_magnitude,[1]), [tf.shape(arr)[0]])
+
+    return_dtype = (arr.dtype, arr.dtype)
+
+    return tf.map_fn(set_max_magnitude_and_return_scaling_factors, (arr, max_magnitude), dtype = return_dtype)
