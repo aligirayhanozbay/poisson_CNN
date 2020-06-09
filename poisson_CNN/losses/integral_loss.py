@@ -7,6 +7,10 @@ def find_neighbouring_indices_along_axis(grid_sizes, quadrature_coords_along_axi
     dx = tf.cast(2/(dim_size-1), tf.keras.backend.floatx())
     lower_idx = tf.cast(tf.math.floor((quadrature_coords_along_axis+1)/dx), tf.int32)
     upper_idx = tf.cast(tf.math.ceil((quadrature_coords_along_axis+1)/dx), tf.int32)
+    equal_indices = (upper_idx == lower_idx)
+    if tf.reduce_any(equal_indices):#sometimes a quad pt may coincide with the position of a gridpoint. adjust upper idx for that possibility
+        new_upper_indices = tf.gather_nd(upper_idx,tf.where(equal_indices)) + 1
+        upper_idx = tf.tensor_scatter_nd_update(upper_idx, tf.where(equal_indices), new_upper_indices)
     return tf.stack([lower_idx,upper_idx],1)
     
 def find_neighbouring_indices_wrapper(quadrature_coords, data_format):
@@ -70,7 +74,7 @@ def sample_values_enclosing_GL_quadrature_points_from_grid(*neighbouring_indices
     return values
     
 
-class integral_loss:
+class integral_loss(tf.keras.losses.Loss):
     def __init__(self, n_quadpts, ndims = None, Lp_norm_power = 2, data_format = 'channels_first'):
         '''
         This is a loss function which calculates the integral (or continuous) Lp norm of the ground truth and the prediction instead of the discrete Lp norm. (y-t)^p is interpolated onto the Gauss-Legendre quadrature points using multilinear interpolation and then the integral of the quantity over the domain is approximated with the GL quadrature method.
@@ -81,6 +85,7 @@ class integral_loss:
         -Lp_norm_power: int. Determines the order of the norm.
         -data_format: str. see tf.keras documentation.
         '''
+        super().__init__()
         if ndims is None:
             ndims = len(n_quadpts)
         if isinstance(n_quadpts, int):
@@ -120,10 +125,10 @@ class integral_loss:
         -y_pred: tf.Tensor of shape identical to y_true or a list of 2 tensors, first of which has shape identical to y_true and second is of shape (batch_size,self.ndims). Contains the prediction and, optionally, a grid spacing value that can be used to adjust loss calculation to domains other than the default [-1,1] x ... x [-1,1]
         '''
         gridshape = tf.shape(y_true)
-        try:
+        if isinstance(y_pred,list) and len(y_pred) == 2:
             y_pred, dx = y_pred
             domain_size = tf.einsum('i,bi->bi',tf.cast((gridshape[2:] if self.data_format == 'channels_first' else gridshape[1:-1])-1,dx.dtype),dx)
-        except:
+        else:
             domain_size = 2*tf.ones([gridshape[0],self.ndims])
         
         neighbouring_indices = self.find_neighbouring_indices(gridshape)
@@ -152,7 +157,6 @@ class integral_loss:
 
         #solve linear systems to acquire interpolation coefficients
         interpolation_coefficients = tf.linalg.solve(interpolation_matrix,pointwise_loss_values_surrounding_quadrature_points)[...,0]
-
         #get loss at quadrature points
         loss_at_quadrature_points_einsum_str = 'i...,bc...i->bc...' if self.data_format == 'channels_first' else 'i...,b...ci->b...c'
         loss_at_quadrature_points = tf.einsum(loss_at_quadrature_points_einsum_str,self.multilinear_interpolation_basis_polynomial_values_at_quadrature_coords, interpolation_coefficients)

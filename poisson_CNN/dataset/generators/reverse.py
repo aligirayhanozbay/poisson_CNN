@@ -31,8 +31,8 @@ def choose_conv_method(ndims):
 
 def process_normalizations(normalizations):
 
-    normalization_types = ['rhs_max_magnitude', 'max_domain_size_squared']
-    normalization_default_values = [False,False]
+    normalization_types = ['rhs_max_magnitude', 'max_domain_size_squared', 'soln_max_magnitude']
+    normalization_default_values = [False,False,False]
 
     if normalizations is None:
         return {key:default_val for key,default_val in zip(normalization_types,normalization_default_values)}
@@ -299,24 +299,24 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
     #@tf.function
     def apply_normalization(self,rhses,solns,domain_sizes):
-        soln_scaling_factors = tf.ones(solns.shape[0],dtype=tf.keras.backend.floatx())
         if (self.normalizations['rhs_max_magnitude'] != False):
             rhses, rhs_max_magnitude_soln_scaling_factors = self.rhs_max_magnitude_normalization(rhses,solns)
-            soln_scaling_factors *= rhs_max_magnitude_soln_scaling_factors
+            solns = tf.einsum('i...,i->i...',solns,rhs_max_magnitude_soln_scaling_factors)
+        if (self.normalizations['soln_max_magnitude'] != False):
+            solns = set_max_magnitude_in_batch(solns,1.0)
         if self.normalizations['max_domain_size_squared']:
             max_domain_size_squared_soln_scaling_factors = self.max_domain_size_squared_normalization(domain_sizes)
-            soln_scaling_factors *= max_domain_size_squared_soln_scaling_factors
-        solns = tf.einsum('i,i...->i...', soln_scaling_factors, solns)
+            solns = tf.einsum('i...,i->i...',solns,max_domain_size_squared_soln_scaling_factors)
         return rhses, solns
 
-    #@tf.function
-    def set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(self,rhses_fourier, rhses_taylor, solns_taylor):
+    @tf.function
+    def set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(self, rhses_fourier, rhses_taylor, solns_taylor):
         rhses_taylor_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_taylor)#scale taylor series component to that the max magnitude is identical to the fourier series component
         rhses_fourier_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_fourier)
         taylor_scaling_coeffs = rhses_fourier_max/rhses_taylor_max
-        rhses_taylor = tf.einsum('i,i...->i...',taylor_scaling_coeffs, rhses_taylor)
-        solns_taylor = tf.einsum('i,i...->i...',taylor_scaling_coeffs, solns_taylor)
-        return rhses_taylor, solns_taylor
+        rhses_taylor_out = taylor_scaling_coeffs * rhses_taylor
+        solns_taylor_out = taylor_scaling_coeffs * solns_taylor
+        return rhses_taylor_out, solns_taylor_out
         
 
     #@tf.function
@@ -324,10 +324,10 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         #fourier component
         solns_fourier, soln_coeffs_fourier = self.generate_soln_fourier()
         rhses_fourier, grid_spacings_fourier, domain_sizes = self.generate_rhses_fourier(soln_coeffs_fourier, tf.shape(solns_fourier)[2:])
-
+        
         #taylor series component
         rhses_taylor, solns_taylor = self.generate_soln_and_rhs_taylor(tf.shape(solns_fourier)[2:], domain_sizes)
-        rhses_taylor, solns_taylor = self.set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(rhses_fourier, rhses_taylor, solns_taylor)
+        #rhses_taylor, solns_taylor = self.set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(rhses_fourier, rhses_taylor, solns_taylor)
         
         #sum components
         solns = solns_fourier + solns_taylor

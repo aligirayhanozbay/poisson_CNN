@@ -1,7 +1,7 @@
 import tensorflow as tf
 import argparse, json
 
-from ..models import Homogeneous_Poisson_NN
+from ..models import Homogeneous_Poisson_NN_Metalearning
 from ..losses import loss_wrapper
 from ..dataset.generators import reverse_poisson_dataset_generator
 
@@ -29,7 +29,7 @@ for key in config['model'].keys():
             if 'activation' in layer_config_key and isinstance(config['model'][key][layer_config_key],str):
                 config['model'][key][layer_config_key] = eval(config['model'][key][layer_config_key])
 
-model = Homogeneous_Poisson_NN(**config['model'])
+model = Homogeneous_Poisson_NN_Metalearning(**config['model'])
 optimizer = choose_optimizer(config['training']['optimizer'])(**config['training']['optimizer_parameters'])
 loss = loss_wrapper(**config['training']['loss_parameters'])
 
@@ -45,7 +45,7 @@ out = model(inp)
 model.compile(loss=loss,optimizer=optimizer)
 cb = [
     tf.keras.callbacks.ModelCheckpoint(checkpoint_dir + '/chkpt.checkpoint',save_weights_only=True,save_best_only=True,monitor = 'loss'),
-    tf.keras.callbacks.ReduceLROnPlateau(patience = 4,monitor='loss')
+    tf.keras.callbacks.ReduceLROnPlateau(patience = 4,monitor='loss',min_lr=config['training']['min_learning_rate'])
 ]
 
 if args.continue_from_checkpoint is not None:
