@@ -1,5 +1,6 @@
 {
     "model":{
+	"use_metalearning": true,
 	"data_format":"channels_first",
 	"ndims":2,
 	"use_batchnorm":true,

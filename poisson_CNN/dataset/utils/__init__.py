@@ -7,3 +7,4 @@ from .generate_smooth_function import generate_smooth_function
 from .split_indices import split_indices
 from .equal_split_tensor_slice import equal_split_tensor_slice
 from .build_fd_coefficients import build_fd_coefficients
+from .compute_domain_sizes import compute_domain_sizes

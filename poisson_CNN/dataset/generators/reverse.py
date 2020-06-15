@@ -339,6 +339,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         #pack
         out = self.pack_outputs(rhses, solns, grid_spacings)
+        #out = self.pack_outputs(rhses, rhses, grid_spacings)
         return out
 
 if __name__=='__main__':

@@ -1,2 +1,3 @@
 from .Homogeneous_Poisson_NN_Metalearning import Homogeneous_Poisson_NN_Metalearning
 from .Homogeneous_Poisson_NN import Homogeneous_Poisson_NN
+from .Homogeneous_Poisson_NN_Autoencoder import Homogeneous_Poisson_NN_Autoencoder_2D, Homogeneous_Poisson_NN_AE_Decoder_Fourier

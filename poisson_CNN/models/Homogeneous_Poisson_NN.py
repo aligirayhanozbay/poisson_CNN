@@ -18,7 +18,6 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         self._input_normalization_has_to_be_performed = tf.reduce_any([bool(x) for x in self.input_normalization.values()])
         self.output_scaling = process_output_scaling_modes(output_scaling)
         #self._output_scaling_has_to_be_performed = tf.reduce_any(list(self.output_scaling.values()))
-        print(self._output_scaling_has_to_be_performed)
         if self.output_scaling['match_peak_laplacian_magnitude_to_peak_rhs']:
             self.fd_stencil = tf.constant(poisson_CNN.dataset.utils.build_fd_coefficients(5, 2, ndims), dtype=tf.keras.backend.floatx())
             self.fd_conv_method = choose_conv_method(ndims)
@@ -66,6 +65,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         else:
             raise(ValueError('Invalid bottleneck block upsampling method'))
         self.n_bottleneck_blocks = tf.cast(len(self.bottleneck_blocks),tf.keras.backend.floatx())
+        self.bottleneck_blocks = sorted(self.bottleneck_blocks, key = lambda x: x.downsampling_factor, reverse=True)
 
         #final convolutions
         self.final_convolutions = []
@@ -169,12 +169,12 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         if self.bottleneck_upsampling == 'deconv':
             bottleneck_result = self.bottleneck_blocks[0](initial_conv_result)
             for layer in self.bottleneck_blocks[1:]:
-                bottleneck_result += layer(initial_conv_result)
+                bottleneck_result = layer(tf.concat([initial_conv_result, bottleneck_result], 1 if self.data_format == 'channels_first' else -1))
         elif self.bottleneck_upsampling == 'multilinear':
             bottleneck_result = self.bottleneck_blocks[0]([initial_conv_result, domain_sizes])
             for layer in self.bottleneck_blocks[1:]:
-                bottleneck_result += layer([initial_conv_result, domain_sizes])
-        bottleneck_result = bottleneck_result / self.n_bottleneck_blocks
+                bottleneck_result = layer([tf.concat([initial_conv_result, bottleneck_result], 1 if self.data_format == 'channels_first' else -1), domain_sizes])
+        #bottleneck_result = bottleneck_result / self.n_bottleneck_blocks
 
         out = self.final_convolution_ops[0](bottleneck_result)
         for layer in self.final_convolution_ops[1:]:
