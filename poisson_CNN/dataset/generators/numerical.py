@@ -122,7 +122,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
         else:
             raise(ValueError('solver_method must be a function or one of cholesky, multigrid or multigrid_gpu'))
 
-    out = tf.constant(solver_method(rhses, boundaries,dx))
+    out = tf.constant(solver_method(rhses, boundaries,dx), dtype = tf.keras.backend.floatx())
 
     if normalize_by_domain_size:
         domainsize = tf.squeeze(dx**len(output_shape)) * np.prod(np.array(output_shape)-1)
@@ -130,7 +130,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     
     inp = []
     if return_rhs:
-        inp.append(rhses)
+        inp.append(tf.cast(rhses, tf.keras.backend.floatx()))
     if return_boundaries:
         inp.append(boundaries)
     if return_dx:

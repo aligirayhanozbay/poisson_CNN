@@ -38,7 +38,7 @@ def convolution_and_bias_add_closure(data_format, conv_method, use_bias, upsampl
 
 
 class metalearning_deconvupscale(tf.keras.layers.Layer):
-    def __init__(self, upsample_ratio, previous_layer_filters, filters, kernel_size, data_format = 'channels_first', conv_activation = tf.keras.activations.linear, use_bias = True, kernel_initializer = None, bias_initializer = None, kernel_regularizer = None, bias_regularizer = None, activity_regularizer = None, kernel_constraint = None, bias_constraint = None, dimensions = None, dense_activations = tf.keras.activations.linear, pre_output_dense_units = [8,16], **kwargs):
+    def __init__(self, upsample_ratio, filters, kernel_size, data_format = 'channels_first', conv_activation = tf.keras.activations.linear, use_bias = True, kernel_initializer = None, bias_initializer = None, kernel_regularizer = None, bias_regularizer = None, activity_regularizer = None, kernel_constraint = None, bias_constraint = None, dimensions = None, dense_activations = tf.keras.activations.linear, pre_output_dense_units = [8,16], **kwargs):
         '''
         An upsampling layer using a transposed convolution the kernel and bias of which is generated with a feedforward NN.
         '''
@@ -69,19 +69,19 @@ class metalearning_deconvupscale(tf.keras.layers.Layer):
         self._tf_data_format = convert_keras_dataformat_to_tf(self.data_format, self.dimensions)
 
         self.filters = filters
-        self.previous_layer_filters = previous_layer_filters
         
         self.use_bias = use_bias
 
-        self.kernel_shape = tf.concat([self.kernel_size,[self.filters],[self.previous_layer_filters]], axis = 0)
         self.bias_shape = tf.constant([self.filters])
 
         if callable(dense_activations):
-            dense_activations = [dense_activations for _ in range(len(pre_output_dense_units)+1)]
+            self.dense_activations = [dense_activations for _ in range(len(pre_output_dense_units)+1)]
+        else:
+            self.dense_activations = dense_activations
+        
 
-        dense_layer_args = {'use_bias': use_bias, 'kernel_initializer': kernel_initializer, 'bias_initializer': bias_initializer, 'kernel_regularizer': kernel_regularizer, 'bias_regularizer': bias_regularizer, 'activity_regularizer': activity_regularizer, 'kernel_constraint': kernel_constraint, 'bias_constraint': bias_constraint}
-            
-        self.dense_layers = [tf.keras.layers.Dense(pre_output_dense_units[k], activation = dense_activations[k], **dense_layer_args) for k in range(len(pre_output_dense_units))] + [tf.keras.layers.Dense(tf.reduce_prod(self.kernel_shape)+self.bias_shape, activation = dense_activations[-1], **dense_layer_args)]
+        self._other_dense_layer_args = {'use_bias': use_bias, 'kernel_initializer': kernel_initializer, 'bias_initializer': bias_initializer, 'kernel_regularizer': kernel_regularizer, 'bias_regularizer': bias_regularizer, 'activity_regularizer': activity_regularizer, 'kernel_constraint': kernel_constraint, 'bias_constraint': bias_constraint}
+        self.pre_output_dense_units = pre_output_dense_units
 
 
         if self.dimensions == 1:
@@ -94,6 +94,13 @@ class metalearning_deconvupscale(tf.keras.layers.Layer):
             raise(ValueError('dimensions must be 1,2 or 3'))
         
         self.conv_method = convolution_and_bias_add_closure(self._tf_data_format, self.conv_method, self.use_bias, self.upsample_ratio)
+
+    def build(self, input_shape):
+
+        self.previous_layer_filters = input_shape[0][1 if self.data_format == 'channels_first' else -1]
+        self.kernel_shape = tf.concat([self.kernel_size,[self.filters],[self.previous_layer_filters]], axis = 0)
+        self.bias_shape = tf.constant([self.filters if self.use_bias else 0])
+        self.dense_layers = [tf.keras.layers.Dense(self.pre_output_dense_units[k], activation = self.dense_activations[k], **self._other_dense_layer_args) for k in range(len(self.pre_output_dense_units))] + [tf.keras.layers.Dense(tf.reduce_prod(self.kernel_shape)+self.bias_shape, activation = self.dense_activations[-1], **self._other_dense_layer_args)]
 
 
     @tf.function
@@ -142,9 +149,9 @@ if __name__ == '__main__':
 
             self.out_channels = 3
             self.pool = tf.keras.layers.MaxPool2D(data_format = 'channels_first',padding='same')
-            self.upscale = metalearning_deconvupscale(2, 2, self.out_channels, (13,21), use_bias = True, data_format = 'channels_first')
+            self.upscale = metalearning_deconvupscale(2, self.out_channels, (13,21), use_bias = True, data_format = 'channels_first')
 
-        @tf.function
+        #@tf.function
         def call(self, inp):
             conv_input, dense_input = inp
             orig_shape = tf.shape(conv_input)

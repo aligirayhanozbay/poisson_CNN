@@ -23,7 +23,7 @@ def pyamgx_solve(A, b, config = None):
     Outputs a numpy array containing the solution to the equation system.
     '''
     pyamgx.initialize()
-    
+    pyamgx.register_print_callback(lambda msg: print(''))
     try:#try-except block to call pyamgx.finalize() in the case an error occurs - subsequent calls with good inputs will fail otherwise
         if config is None:
             #default config copied directly from https://github.com/NVIDIA/AMGX/blob/master/core/configs/AMG_CLASSICAL_CG.json
@@ -56,6 +56,7 @@ def pyamgx_solve(A, b, config = None):
     
         if not isinstance(b,np.ndarray):
             b = np.array(b)
+        b = b.astype(np.float64)
         b_pyamgx = pyamgx.Vector()
         b_pyamgx.create(resources, mode='dDDI')
         b_pyamgx.upload(b)
@@ -117,14 +118,14 @@ def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = No
     if use_pyamgx:
         for k in range(rhses.shape[0]):
             interior_slice[0] = k
-            solns[interior_slice] = pyamgx_solve(system_matrix, rhs_vectors[k,...]).reshape([dim-2 for dim in rhses.shape[1:]], order = 'c')
+            solns[tuple(interior_slice)] = pyamgx_solve(system_matrix, rhs_vectors[k,...]).reshape([dim-2 for dim in rhses.shape[1:]], order = 'c')
 
     else:
         solver = pyamg.ruge_stuben_solver(system_matrix, **solver_init_parameters)
 
         for k in range(rhses.shape[0]):
             interior_slice[0] = k
-            solns[interior_slice] = solver.solve(np.squeeze(rhs_vectors[k,...]), tol = tol, **solver_run_parameters).reshape([dim-2 for dim in rhses.shape[1:]], order = 'c')
+            solns[tuple(interior_slice)] = solver.solve(np.squeeze(rhs_vectors[k,...]), tol = tol, **solver_run_parameters).reshape([dim-2 for dim in rhses.shape[1:]], order = 'c')
 
     solns[...,:,-1] = boundaries['top']
     solns[...,:,0] = boundaries['bottom']

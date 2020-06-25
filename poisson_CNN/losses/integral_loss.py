@@ -31,8 +31,10 @@ def get_input_grid_coordinates_wrapper(ndims, data_format):
     def get_input_grid_coordinates(gridshape):
         loop_start = 2 if data_format == 'channels_first' else 1
         return_list = []
+        linspace_start  = tf.constant(-1.0,tf.keras.backend.floatx())
+        linspace_end = tf.constant(1.0,tf.keras.backend.floatx())
         for k in range(loop_start, loop_start+ndims):
-            return_list.append(tf.linspace(-1.0,1.0,tf.cast(gridshape[k], tf.int32)))
+            return_list.append(tf.linspace(linspace_start,linspace_end,tf.cast(gridshape[k], tf.int32)))
         return return_list
     return get_input_grid_coordinates
 
@@ -54,7 +56,8 @@ def build_corner_coordinate_combinations(corner_coords, ndims):
     return tf.stack(corner_coords,-1)
 
 def binary_numbers_up_to_value(k):
-    bits = int(tf.cast(tf.math.ceil(tf.math.log(tf.cast(k,tf.keras.backend.floatx()))/tf.math.log(2.0)),tf.int32))
+    log2 = tf.cast(tf.math.log(2.0), tf.keras.backend.floatx())
+    bits = int(tf.cast(tf.math.ceil(tf.math.log(tf.cast(k,tf.keras.backend.floatx()))/log2),tf.int32))
     return np.array([list(reversed([int(s) for s in list(('{0:0' + str(bits) + 'b}').format(i))])) for i in range(k)])
 
 @tf.function

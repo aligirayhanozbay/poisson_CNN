@@ -22,6 +22,14 @@ def apply_advanced_padding_and_call_conv_layer(padding_mode, conv_layer, constan
         out = conv_layer(out)
         return out
     return pad_and_apply_convolution
+
+def check_batchnorm_fused_enable():
+    floatx = tf.keras.backend.floatx()
+    batchnorm_fused_allowed_datatypes = ['float16', 'float32', 'bfloat16']
+    if floatx in batchnorm_fused_allowed_datatypes:
+        return True
+    else:
+        return False
     
 
 class resnet(tf.keras.models.Model):
@@ -43,8 +51,9 @@ class resnet(tf.keras.models.Model):
                     batchnorm_axis = -1
             except:
                 batchnorm_axis = 1
-            self.batchnorm0 = tf.keras.layers.BatchNormalization(axis = batchnorm_axis, trainable = batchnorm_trainable)
-            self.batchnorm1 = tf.keras.layers.BatchNormalization(axis = batchnorm_axis, trainable = batchnorm_trainable)
+            enable_fused_batchnorm = check_batchnorm_fused_enable()
+            self.batchnorm0 = tf.keras.layers.BatchNormalization(axis = batchnorm_axis, trainable = batchnorm_trainable, fused = enable_fused_batchnorm)
+            self.batchnorm1 = tf.keras.layers.BatchNormalization(axis = batchnorm_axis, trainable = batchnorm_trainable, fused = enable_fused_batchnorm)
 
     @tf.function
     def call(self, inp):

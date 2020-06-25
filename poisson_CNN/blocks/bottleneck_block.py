@@ -1,7 +1,7 @@
 import tensorflow as tf
 import copy
 
-from .resnet import choose_conv_layer, apply_advanced_padding_and_call_conv_layer, resnet
+from .resnet import check_batchnorm_fused_enable, choose_conv_layer, apply_advanced_padding_and_call_conv_layer, resnet
 from .metalearning_bottleneck_block import get_pooling_method
 from ..layers import Upsample, deconvupscale
 
@@ -16,6 +16,7 @@ class bottleneck_block_multilinearupsample(tf.keras.models.Model):
             upsampling_factor = downsampling_factor
         self.upsampling_factor = upsampling_factor
         self.use_batchnorm = use_batchnorm
+        self.downsampling_method = downsampling_method.lower()
 
         self.filters = filters
 
@@ -24,19 +25,22 @@ class bottleneck_block_multilinearupsample(tf.keras.models.Model):
         conv_init_args = {**conv_init_args, **conv_initializer_constraint_regularizer_options}
         self.conv_layers = []
 
-        if downsampling_method == 'conv':
+        if self.downsampling_method == 'conv':
             downsampling_input_args = copy.deepcopy(conv_init_args)
             downsampling_input_args['padding'] = 'same'
             downsampling_input_args['strides'] = self.downsampling_factor
             downsampling_input_args['kernel_size'] = conv_downsampling_kernel_size
             self.downsample_layer = conv_layer(**downsampling_input_args)
             self._apply_downsample = apply_advanced_padding_and_call_conv_layer(padding_mode, self.downsample_layer, constant_padding_value)
-        elif downsampling_method == 'pool':
+        elif self.downsampling_method == 'pool':
             downsampling_input_args = {'pool_size': downsampling_factor, 'padding':'same', 'data_format':data_format}
             self.downsample_layer = get_pooling_method(pool_downsampling_method, ndims)(**downsampling_input_args)
             if use_resnet:
                 first_conv_layer = conv_layer(padding = 'valid', **conv_init_args)
                 self.conv_layers.append(first_conv_layer)
+            self._apply_downsample = self.downsample_layer
+        else:
+            raise(ValueError('Downsampling method can only be conv or pool'))
 
         if use_resnet:
             conv_init_args['ndims'] = ndims
@@ -46,10 +50,11 @@ class bottleneck_block_multilinearupsample(tf.keras.models.Model):
             conv_init_args['constant_padding_value'] = constant_padding_value
             conv_layer = resnet
 
+        batchorm_fused_enable = check_batchnorm_fused_enable()
         while len(self.conv_layers) < n_convs:
             self.conv_layers.append(conv_layer(**conv_init_args))
             if use_batchnorm and (not use_resnet):
-                self.conv_layers.append(tf.keras.layers.BatchNormalization(axis = 1 if data_format == 'channels_first' else -1, trainable = batchnorm_trainable))
+                self.conv_layers.append(tf.keras.layers.BatchNormalization(axis = 1 if data_format == 'channels_first' else -1, trainable = batchnorm_trainable, fused = batchorm_fused_enable))
 
         self._apply_convolution = []
         for layer in self.conv_layers:
@@ -60,7 +65,7 @@ class bottleneck_block_multilinearupsample(tf.keras.models.Model):
             
         self.upsample_layer = Upsample(ndims = ndims, data_format = self.data_format)
 
-    @tf.function
+    #@tf.function
     def call(self, inp):
         conv_inp, domain_sizes = inp
 
@@ -73,9 +78,9 @@ class bottleneck_block_multilinearupsample(tf.keras.models.Model):
             inpshape = tf.shape(conv_inp)[2:]
         else:
             inpshape = tf.shape(conv_inp)[1:-1]
-
+            
         outshape = tf.cast((inpshape/self.downsampling_factor)*self.upsampling_factor,tf.int32)
-
+        
         out = self.upsample_layer([out, domain_sizes, outshape])
 
         return out

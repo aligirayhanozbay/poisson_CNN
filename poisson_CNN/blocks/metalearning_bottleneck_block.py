@@ -3,6 +3,7 @@ import copy
 
 from ..layers import metalearning_conv, metalearning_deconvupscale, Upsample
 from .metalearning_resnet import metalearning_resnet
+from .resnet import check_batchnorm_fused_enable
 
 def get_pooling_method(pool_downsampling_method, ndims):
     pool_downsampling_method = pool_downsampling_method[0].upper() + pool_downsampling_method[1:].lower()
@@ -10,14 +11,13 @@ def get_pooling_method(pool_downsampling_method, ndims):
     return eval(pooling_layer_name)
 
 class metalearning_bottleneck_block_deconvupsample(tf.keras.models.Model):
-    def __init__(self, ndims, downsampling_factor, previous_layer_filters, filters, conv_kernel_size, deconv_kernel_size, n_convs = 1, conv_padding_mode = 'constant', conv_constant_padding_value = 0.0, conv_conv_activation = tf.keras.activations.linear, conv_dense_activation = tf.keras.activations.linear, conv_pre_output_dense_units = [8,16], conv_use_bias = True, deconv_conv_activation = tf.keras.activations.linear, deconv_dense_activation = tf.keras.activations.linear, deconv_pre_output_dense_units = [8,16], deconv_use_bias = True, use_resnet = False, upsampling_factor = None, data_format = 'channels_first', conv_initializer_constraint_regularizer_options = {}, deconv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True):
+    def __init__(self, ndims, downsampling_factor, filters, conv_kernel_size, deconv_kernel_size, n_convs = 1, conv_padding_mode = 'constant', conv_constant_padding_value = 0.0, conv_conv_activation = tf.keras.activations.linear, conv_dense_activation = tf.keras.activations.linear, conv_pre_output_dense_units = [8,16], conv_use_bias = True, deconv_conv_activation = tf.keras.activations.linear, deconv_dense_activation = tf.keras.activations.linear, deconv_pre_output_dense_units = [8,16], deconv_use_bias = True, use_resnet = False, upsampling_factor = None, data_format = 'channels_first', conv_initializer_constraint_regularizer_options = {}, deconv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True):
         '''
         A block which downsamples the output by downsampling_factor, applies a convolution operation and upsamples.
 
         Inputs:
         -ndims: int. Number of spatial dimensions, can be 1 2 or 3.
         -downsampling_factor: int or list of ints. Each dimension in the downsampled resolution will have dimension[k]//downsampling_factor[k] size.
-        -previous_layer_filters: int. The image supplied to this layer will have a # of channels identical to this argument.
         -filters: int. The output will have this many channels.
         -conv_kernel_size: int or list of ints. The shape of the kernel of the downsampled convolution operation(s) will be this.
         -deconv_kernel_size: int or list of ints. The The shape of the kernel of the upsampling transposed convolution operation(s) will be this.
@@ -52,12 +52,11 @@ class metalearning_bottleneck_block_deconvupsample(tf.keras.models.Model):
             upsampling_factor = downsampling_factor
         self.upsampling_factor = upsampling_factor
 
-        self.previous_layer_filters = previous_layer_filters
         self.filters = filters
 
         self.conv_layers = []
             
-        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias, 'use_batchnorm': use_batchnorm}
+        conv_input_args = {'dimensions': ndims, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias, 'use_batchnorm': use_batchnorm}
         if use_resnet:
             conv_input_args['use_batchnorm'] = use_batchnorm
 
@@ -65,19 +64,17 @@ class metalearning_bottleneck_block_deconvupsample(tf.keras.models.Model):
         if downsampling_method == 'conv':
             if conv_downsampling_kernel_size is None:
                 conv_downsampling_kernel_size = conv_kernel_size
-            downsampling_input_args = {'dimensions':ndims,'previous_layer_filters': previous_layer_filters, 'filters': filters, 'kernel_size': conv_downsampling_kernel_size, 'strides': downsampling_factor, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias}
+            downsampling_input_args = {'dimensions':ndims, 'filters': filters, 'kernel_size': conv_downsampling_kernel_size, 'strides': downsampling_factor, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias}
             downsampling_input_args = {**downsampling_input_args, **conv_initializer_constraint_regularizer_options}#merges dicts
             self.downsample_layer = metalearning_conv(**downsampling_input_args)
         elif downsampling_method == 'pool':
             downsampling_input_args = {'pool_size': downsampling_factor, 'padding':'same', 'data_format':data_format}
             self.downsample_layer = get_pooling_method(pool_downsampling_method, ndims)(**downsampling_input_args)
-            if previous_layer_filters != filters:
-                first_conv_layer_input_args = copy.deepcopy(conv_input_args)
-                if use_resnet:
-                    del first_conv_layer_input_args['use_batchnorm']
-                first_conv_layer_input_args['previous_layer_filters'] = previous_layer_filters
-                first_conv_layer = metalearning_conv(**first_conv_layer_input_args)
-                self.conv_layers.append(first_conv_layer)
+            first_conv_layer_input_args = copy.deepcopy(conv_input_args)
+            if use_resnet:
+                del first_conv_layer_input_args['use_batchnorm']
+            first_conv_layer = metalearning_conv(**first_conv_layer_input_args)
+            self.conv_layers.append(first_conv_layer)
 
         if use_resnet:
             del conv_input_args['padding']
@@ -89,13 +86,14 @@ class metalearning_bottleneck_block_deconvupsample(tf.keras.models.Model):
         while len(self.conv_layers) < n_convs:
             self.conv_layers.append(conv_layer(**conv_input_args))
 
-        upsampling_input_args = {'upsample_ratio': upsampling_factor, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': deconv_kernel_size, 'data_format': data_format, 'conv_activation': deconv_conv_activation, 'dense_activations': deconv_dense_activation, 'use_bias': deconv_use_bias, 'dimensions': ndims, 'pre_output_dense_units': deconv_pre_output_dense_units}
+        upsampling_input_args = {'upsample_ratio': upsampling_factor, 'filters': filters, 'kernel_size': deconv_kernel_size, 'data_format': data_format, 'conv_activation': deconv_conv_activation, 'dense_activations': deconv_dense_activation, 'use_bias': deconv_use_bias, 'dimensions': ndims, 'pre_output_dense_units': deconv_pre_output_dense_units}
         upsampling_input_args = {**upsampling_input_args, **deconv_initializer_constraint_regularizer_options}
 
         self.upsample_layer = metalearning_deconvupscale(**upsampling_input_args)
         self.use_batchnorm = use_batchnorm
         if use_batchnorm:
-            self.batchnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1, trainable = batchnorm_trainable)
+            batchnorm_fused_enable = check_batchnorm_fused_enable()
+            self.batchnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1, trainable = batchnorm_trainable, fused = batchnorm_fused_enable)
 
             
     @tf.function
@@ -126,7 +124,7 @@ class metalearning_bottleneck_block_deconvupsample(tf.keras.models.Model):
         return out
 
 class metalearning_bottleneck_block_multilinearupsample(tf.keras.models.Model):
-    def __init__(self, ndims, downsampling_factor, previous_layer_filters, filters, conv_kernel_size, n_convs = 1, conv_padding_mode = 'constant', conv_constant_padding_value = 0.0, conv_conv_activation = tf.keras.activations.linear, conv_dense_activation = tf.keras.activations.linear, conv_pre_output_dense_units = [8,16], conv_use_bias = True, use_resnet = False, upsampling_factor = None, data_format = 'channels_first', conv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True):
+    def __init__(self, ndims, downsampling_factor, filters, conv_kernel_size, n_convs = 1, conv_padding_mode = 'constant', conv_constant_padding_value = 0.0, conv_conv_activation = tf.keras.activations.linear, conv_dense_activation = tf.keras.activations.linear, conv_pre_output_dense_units = [8,16], conv_use_bias = True, use_resnet = False, upsampling_factor = None, data_format = 'channels_first', conv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True):
         super().__init__()
         
         self.data_format = data_format
@@ -135,12 +133,11 @@ class metalearning_bottleneck_block_multilinearupsample(tf.keras.models.Model):
             upsampling_factor = downsampling_factor
         self.upsampling_factor = upsampling_factor
 
-        self.previous_layer_filters = previous_layer_filters
         self.filters = filters
 
         self.conv_layers = []
 
-        conv_input_args = {'dimensions': ndims, 'previous_layer_filters': filters, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias, 'use_batchnorm': use_batchnorm}
+        conv_input_args = {'dimensions': ndims, 'filters': filters, 'kernel_size': conv_kernel_size, 'strides': None, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias, 'use_batchnorm': use_batchnorm}
         if use_resnet:
             conv_input_args['use_batchnorm'] = use_batchnorm
         
@@ -148,19 +145,17 @@ class metalearning_bottleneck_block_multilinearupsample(tf.keras.models.Model):
         if downsampling_method == 'conv':
             if conv_downsampling_kernel_size is None:
                 conv_downsampling_kernel_size = conv_kernel_size
-            downsampling_input_args = {'dimensions':ndims,'previous_layer_filters': previous_layer_filters, 'filters': filters, 'kernel_size': conv_downsampling_kernel_size, 'strides': downsampling_factor, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias}
+            downsampling_input_args = {'dimensions':ndims, 'filters': filters, 'kernel_size': conv_downsampling_kernel_size, 'strides': downsampling_factor, 'dilation_rate': None, 'padding': 'same', 'padding_mode': conv_padding_mode, 'constant_padding_value': conv_constant_padding_value, 'data_format': data_format, 'conv_activation': conv_conv_activation, 'dense_activations': conv_dense_activation, 'pre_output_dense_units': conv_pre_output_dense_units, 'use_bias': conv_use_bias}
             downsampling_input_args = {**downsampling_input_args, **conv_initializer_constraint_regularizer_options}#merges dicts
             self.downsample_layer = metalearning_conv(**downsampling_input_args)
         elif downsampling_method == 'pool':
             downsampling_input_args = {'pool_size': downsampling_factor, 'padding':'same', 'data_format':data_format}
             self.downsample_layer = get_pooling_method(pool_downsampling_method, ndims)(**downsampling_input_args)
-            if previous_layer_filters != filters:
-                first_conv_layer_input_args = copy.deepcopy(conv_input_args)
-                if use_resnet:
-                    del first_conv_layer_input_args['use_batchnorm']
-                first_conv_layer_input_args['previous_layer_filters'] = previous_layer_filters
-                first_conv_layer = metalearning_conv(**first_conv_layer_input_args)
-                self.conv_layers.append(first_conv_layer)
+            first_conv_layer_input_args = copy.deepcopy(conv_input_args)
+            if use_resnet:
+                del first_conv_layer_input_args['use_batchnorm']
+            first_conv_layer = metalearning_conv(**first_conv_layer_input_args)
+            self.conv_layers.append(first_conv_layer)
 
         if use_resnet:
             del conv_input_args['padding']
@@ -221,7 +216,7 @@ if __name__ == '__main__':
     conv_activations = tf.nn.leaky_relu
     dense_activations = tf.nn.leaky_relu
     use_batchnorm = True
-    bot = metalearning_bottleneck_block(ndims,downsampling_factor,n_prevch,n_postch,conv_ksize,deconv_ksize,n_convs = n_convs, conv_padding_mode = conv_padding_mode,conv_conv_activation = conv_activations, conv_dense_activation = dense_activations,use_resnet = True,data_format = 'channels_first',upsampling_factor = upsampling_factor, use_batchnorm = use_batchnorm)
+    bot = metalearning_bottleneck_block_deconvupsample(ndims,downsampling_factor,n_postch,conv_ksize,deconv_ksize,n_convs = n_convs, conv_padding_mode = conv_padding_mode,conv_conv_activation = conv_activations, conv_dense_activation = dense_activations,use_resnet = True,data_format = 'channels_first',upsampling_factor = upsampling_factor, use_batchnorm = use_batchnorm)
     
 
     class dummy_data_generator(tf.keras.utils.Sequence):
@@ -234,7 +229,7 @@ if __name__ == '__main__':
         def __len__(self):
             return 50
 
-    conv = metalearning_conv(previous_layer_filters=2,filters=2,kernel_size=3,padding='same',dimensions=ndims)
+    conv = metalearning_conv(filters=2,kernel_size=3,padding='same',dimensions=ndims)
     class dummy_model(tf.keras.models.Model):
         def __init__(self,conv,bottleneck):
             super().__init__()

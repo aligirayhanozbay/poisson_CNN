@@ -24,18 +24,18 @@ def set_max_magnitude_in_batch(arr, max_magnitude):
 
     return tf.map_fn(set_max_magnitude, (arr, max_magnitude), dtype = return_dtype)
 
-#@tf.function(experimental_relax_shapes=True)
+@tf.function(experimental_relax_shapes=True)
 def set_max_magnitude_and_return_scaling_factors(arr):
     '''
     Helper method to set the max magnitude in an array
     '''
     arr,max_magnitude = arr
         
-    scaling_factor = max_magnitude/tf.reduce_max(tf.abs(arr))
+    scaling_factor = tf.cast(max_magnitude, tf.keras.backend.floatx())/tf.reduce_max(tf.abs(arr))
     return arr * scaling_factor, scaling_factor
 
 
-#@tf.function(experimental_relax_shapes=True)
+@tf.function(experimental_relax_shapes=True)
 def set_max_magnitude_in_batch_and_return_scaling_factors(arr, max_magnitude):
     '''
     Set max magnitudes within each batch

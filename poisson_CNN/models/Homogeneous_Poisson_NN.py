@@ -6,7 +6,7 @@ from .Homogeneous_Poisson_NN_Metalearning import get_init_arguments_from_config,
 from ..layers import deconvupscale
 from ..blocks import bottleneck_block_multilinearupsample, bottleneck_block_deconvupsample, resnet
 from ..dataset.utils import set_max_magnitude_in_batch_and_return_scaling_factors, set_max_magnitude_in_batch, build_fd_coefficients
-from ..blocks.resnet import apply_advanced_padding_and_call_conv_layer, choose_conv_layer
+from ..blocks.resnet import apply_advanced_padding_and_call_conv_layer, choose_conv_layer, check_batchnorm_fused_enable
 
 class Homogeneous_Poisson_NN(tf.keras.models.Model):
     def __init__(self, ndims, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_upsampling = 'deconv', bottleneck_config = None, use_batchnorm = False, input_normalization = None, output_scaling = None):
@@ -40,6 +40,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
         fields_in_conv_args = ['filters', 'kernel_size']
         self.pre_bottleneck_convolutions = []#contains the layers
         self.pre_bottleneck_convolution_ops = []#contains functions that implement more advanced padding and then does convolution
+        pre_bottleneck_convolutions_config = copy.deepcopy(pre_bottleneck_convolutions_config)
         pre_bottleneck_convolutions_padding_mode = pre_bottleneck_convolutions_config.pop('padding_mode','CONSTANT')
         pre_bottleneck_convolutions_constant_padding_value = pre_bottleneck_convolutions_config.pop('constant_padding_value',0.0)
         for k in range(len(pre_bottleneck_convolutions_config['filters'])):#
@@ -48,19 +49,20 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
             self.pre_bottleneck_convolutions.append(conv)
             self.pre_bottleneck_convolution_ops.append(apply_advanced_padding_and_call_conv_layer(pre_bottleneck_convolutions_padding_mode, self.pre_bottleneck_convolutions[-1], constant_padding_value = pre_bottleneck_convolutions_constant_padding_value))
             if self.use_batchnorm:
-                bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1)
+                batchnorm_fused_enable = check_batchnorm_fused_enable()
+                bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1, fused = batchnorm_fused_enable)
                 self.pre_bottleneck_convolutions.append(bnorm)
                 self.pre_bottleneck_convolution_ops.append(bnorm)
 
 
         #bottleneck blocks
         if bottleneck_upsampling == 'deconv':
-            fields_in_bottleneck_cfg = ['downsampling_factors', 'upsampling_factors', 'conv_kernel_sizes', 'deconv_kernel_sizes', 'n_convs', 'conv_downsampling_kernel_sizes']
-            fields_in_bottleneck_args = ['downsampling_factor', 'upsampling_factor', 'conv_kernel_size', 'deconv_kernel_size', 'n_convs', 'conv_downsampling_kernel_size']
+            fields_in_bottleneck_cfg = ['downsampling_factors', 'upsampling_factors', 'conv_kernel_sizes', 'deconv_kernel_sizes', 'n_convs'] + (['conv_downsampling_kernel_sizes'] if ('conv_downsampling_kernel_sizes' in bottleneck_deconv_config.keys()) else [])
+            fields_in_bottleneck_args = ['downsampling_factor', 'upsampling_factor', 'conv_kernel_size', 'deconv_kernel_size', 'n_convs'] + (['conv_downsampling_kernel_size'] if ('conv_downsampling_kernel_sizes' in bottleneck_deconv_config.keys()) else [])
             self.bottleneck_blocks = [bottleneck_block_deconvupsample(ndims = ndims, data_format = data_format, use_batchnorm = self.use_batchnorm, **get_init_arguments_from_config(bottleneck_config,k,fields_in_bottleneck_cfg,fields_in_bottleneck_args)) for k in range(len(bottleneck_config['downsampling_factors']))]
         elif bottleneck_upsampling == 'multilinear':
-            fields_in_bottleneck_cfg = ['downsampling_factors', 'upsampling_factors', 'conv_kernel_sizes', 'n_convs', 'conv_downsampling_kernel_sizes']
-            fields_in_bottleneck_args = ['downsampling_factor', 'upsampling_factor', 'conv_kernel_size', 'n_convs', 'conv_downsampling_kernel_size']
+            fields_in_bottleneck_cfg = ['downsampling_factors', 'upsampling_factors', 'conv_kernel_sizes', 'n_convs'] + (['conv_downsampling_kernel_sizes'] if ('conv_downsampling_kernel_sizes' in bottleneck_deconv_config.keys()) else [])
+            fields_in_bottleneck_args = ['downsampling_factor', 'upsampling_factor', 'conv_kernel_size', 'n_convs'] + (['conv_downsampling_kernel_size'] if ('conv_downsampling_kernel_sizes' in bottleneck_deconv_config.keys()) else [])
             self.bottleneck_blocks = [bottleneck_block_multilinearupsample(ndims = ndims, data_format = data_format, use_batchnorm = self.use_batchnorm, **get_init_arguments_from_config(bottleneck_config,k,fields_in_bottleneck_cfg,fields_in_bottleneck_args)) for k in range(len(bottleneck_config['downsampling_factors']))]
         else:
             raise(ValueError('Invalid bottleneck block upsampling method'))
@@ -79,7 +81,7 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
             self.final_convolutions.append(conv)
             self.final_convolution_ops.append(apply_advanced_padding_and_call_conv_layer(final_convolutions_padding_mode, self.final_convolutions[-1], constant_padding_value = final_convolutions_constant_padding_value))
             if self.use_batchnorm and (k<(final_convolution_stages-1)):
-                bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1)
+                bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1, fused = batchnorm_fused_enable)
                 self.pre_bottleneck_convolutions.append(bnorm)
                 self.pre_bottleneck_convolution_ops.append(bnorm)
 
@@ -176,7 +178,8 @@ class Homogeneous_Poisson_NN(tf.keras.models.Model):
                 bottleneck_result = layer([tf.concat([initial_conv_result, bottleneck_result], 1 if self.data_format == 'channels_first' else -1), domain_sizes])
         #bottleneck_result = bottleneck_result / self.n_bottleneck_blocks
 
-        out = self.final_convolution_ops[0](bottleneck_result)
+        out = self.final_convolution_ops[0](tf.concat([initial_conv_result, bottleneck_result], 1 if self.data_format == 'channels_first' else -1))
+        #out = self.final_convolution_ops[0](bottleneck_result)
         for layer in self.final_convolution_ops[1:]:
             out = layer(out)
 
@@ -235,7 +238,7 @@ if __name__ == '__main__':
     output_scaling = None#{'max_domain_size_squared':True}
 
     pbcc = {
-        "filters": [4,6,8],
+        "filters": [4,16,32],
         "kernel_sizes": [19,17,15],
         "padding_mode": "symmetric",
         "activation": tf.nn.leaky_relu,
@@ -243,22 +246,22 @@ if __name__ == '__main__':
         "bias_initializer":"zeros"
 	}
     bcc = {
-        "downsampling_factors": [1,2,3,4],
-        "upsampling_factors": [1,2,3,4],
-        "filters": 8,
-        "conv_kernel_sizes": [13,13,13,13],
-        "n_convs": [2,2,2,2],
+        "downsampling_factors": [1,2,3,4,8,16,32,64],
+        "upsampling_factors": [1,2,3,4,8,16,32,64],
+        "filters": 32,
+        "conv_kernel_sizes": [13,13,13,13,13,13,13,13],
+        "n_convs": [2,2,2,2,2,2,2,2],
         "padding_mode": "CONSTANT",
         "constant_padding_value": 4.0,
         "conv_activation": tf.nn.leaky_relu,
         "conv_use_bias": False,
         "use_resnet": True,
-        "conv_downsampling_kernel_sizes": [3,2,3,4],
+        "conv_downsampling_kernel_sizes": [3,2,3,4,8,16,32,64],
         "conv_initializer_constraint_regularizer_options":{"kernel_regularizer":tf.keras.regularizers.l2()},
         "downsampling_method": "conv"
 	}
     fcc = {
-        "filters": [8,6,4,3,2,1],
+        "filters": [16,12,8,4,2,1],
         "kernel_sizes": [11,7,5,5,3,3],
         "padding_mode": "CONSTANT",
         "constant_padding_value": 2.0,
@@ -268,12 +271,12 @@ if __name__ == '__main__':
         }
 
         
-    
     mod = Homogeneous_Poisson_NN(2, use_batchnorm = False, input_normalization = input_norm, output_scaling = output_scaling, pre_bottleneck_convolutions_config = pbcc, bottleneck_config = bcc, final_convolutions_config = fcc, bottleneck_upsampling = 'multilinear')
-    convinp = 2*tf.random.uniform((1,1,500,500))-1
+    convinp = 2*tf.random.uniform((1,1,3000,3000))-1
     denseinp = tf.random.uniform((1,2))
 
     print(mod([convinp,denseinp]).shape)
+    mod.summary()
     import time
     ntrials = 15
     t0 = time.time()

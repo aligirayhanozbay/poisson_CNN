@@ -5,7 +5,8 @@ from collections.abc import Iterable
 
 @tf.function
 def meshgrid_of_single_domain_size_set(domain_sizes,npts,ndims):
-    coords = [tf.linspace(0.0,domain_sizes[k], num = npts[k]) for k in range(ndims)]
+    linspace_start = tf.constant(0.0,tf.keras.backend.floatx())
+    coords = [tf.linspace(linspace_start,domain_sizes[k], num = npts[k]) for k in range(ndims)]
     mg = tf.stack(tf.meshgrid(*coords,indexing='ij'),-1)
     mg = tf.reshape(mg, [-1,ndims])
     return mg
@@ -20,26 +21,31 @@ class Upsample(tf.keras.layers.Layer):
     def call(self, inputs):
         inp, domain_sizes, output_shape = inputs
 
-        if self.data_format == 'channels_last':
-            inp = tf.einsum('i...j->ij...', inp)
-
         input_shape = tf.shape(inp)
         batch_size = input_shape[0]
         n_channels = input_shape[1]
 
-        lower_domain_coordinates = tf.zeros(tf.shape(domain_sizes),dtype=domain_sizes.dtype)
+        if self.ndims != 2:
+            if self.data_format == 'channels_last':
+                inp = tf.einsum('i...j->ij...', inp)
 
-        output_coords = tf.map_fn(lambda x: meshgrid_of_single_domain_size_set(x, output_shape, self.ndims), domain_sizes, dtype = inp.dtype)
+            lower_domain_coordinates = tf.zeros(tf.shape(domain_sizes),dtype=domain_sizes.dtype)
 
-        output_coords = tf.expand_dims(output_coords,1)
-        lower_domain_coordinates = tf.expand_dims(lower_domain_coordinates,1)
-        domain_sizes = tf.expand_dims(domain_sizes,1)
+            output_coords = tf.map_fn(lambda x: meshgrid_of_single_domain_size_set(x, output_shape, self.ndims), domain_sizes, dtype = inp.dtype)
 
-        out = tfp.math.batch_interp_regular_nd_grid(output_coords, lower_domain_coordinates, domain_sizes, inp, -self.ndims)
+            output_coords = tf.expand_dims(output_coords,1)
+            lower_domain_coordinates = tf.expand_dims(lower_domain_coordinates,1)
+            domain_sizes = tf.expand_dims(domain_sizes,1)
+            out = tfp.math.batch_interp_regular_nd_grid(output_coords, lower_domain_coordinates, domain_sizes, inp, -self.ndims)
+            output_shape = tf.concat([[batch_size],[n_channels],output_shape],0)
 
-        output_shape = tf.concat([[batch_size],[n_channels],output_shape],0)
-
-        out = tf.reshape(out, output_shape)
+            out = tf.reshape(out, output_shape)
+        else:
+            if self.data_format == 'channels_first':
+                inp = tf.einsum('ij...->i...j', inp)
+            out = tf.image.resize(inp, output_shape, preserve_aspect_ratio = False, antialias = False)
+            if self.data_format == 'channels_first':
+                out = tf.einsum('i...j->ij...', out)
 
         return out
 

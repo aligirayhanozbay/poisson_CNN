@@ -4,6 +4,7 @@ import math
 
 from ..layers import metalearning_conv, metalearning_deconvupscale
 from ..blocks import metalearning_bottleneck_block_deconvupsample, metalearning_bottleneck_block_multilinearupsample, metalearning_resnet
+from ..blocks.resnet import check_batchnorm_fused_enable
 from ..dataset.utils import set_max_magnitude_in_batch_and_return_scaling_factors, set_max_magnitude_in_batch, build_fd_coefficients
 from ..dataset.generators.reverse import choose_conv_method
 
@@ -30,6 +31,7 @@ def process_normalizations(normalizations):
     return normalizations
 
 def process_output_scaling_modes(output_scalings):
+    output_scalings = copy.deepcopy(output_scalings)
     output_scaling_modes = ['rhs_max_magnitude', 'max_domain_size_squared', 'match_peak_laplacian_magnitude_to_peak_rhs', 'soln_max_magnitude']
     output_scaling_mode_default_values = [False,False,False,False]
     if output_scalings is None:
@@ -102,15 +104,15 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
 
         fields_in_conv_cfg = ['filters','kernel_sizes']
         fields_in_conv_args = ['filters', 'kernel_size']
-        prev_layer_filters_initialconv = [1+self.ndims] + pre_bottleneck_convolutions_config['filters'][:-1]
         self.pre_bottleneck_convolutions = []
         for k in range(len(pre_bottleneck_convolutions_config['filters'])):#
             conv_args = get_init_arguments_from_config(pre_bottleneck_convolutions_config,k,fields_in_conv_cfg,fields_in_conv_args)
-            conv = metalearning_conv(previous_layer_filters = prev_layer_filters_initialconv[k], data_format = data_format, dimensions = ndims, padding = 'same', **conv_args)
+            conv = metalearning_conv(data_format = data_format, dimensions = ndims, padding = 'same', **conv_args)
             #self.pre_bottleneck_convolutions.append(conv)
             #'''
             if self.use_batchnorm:
-                bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1)
+                batchnorm_fused_enable = check_batchnorm_fused_enable()
+                bnorm = tf.keras.layers.BatchNormalization(axis = 1 if self.data_format == 'channels_first' else -1, fused=batchnorm_fused_enable)
                 block = metalearning_conv_and_batchnorm(conv,bnorm)
                 self.pre_bottleneck_convolutions.append(block)
             else:
@@ -127,26 +129,27 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
 
             fields_in_bottleneck_cfg = ['downsampling_factors', 'upsampling_factors', 'conv_kernel_sizes', 'deconv_kernel_sizes', 'n_convs', 'conv_downsampling_kernel_sizes']
             fields_in_bottleneck_args = ['downsampling_factor', 'upsampling_factor', 'conv_kernel_size', 'deconv_kernel_size', 'n_convs', 'conv_downsampling_kernel_size']
-            prev_layer_filters_bottleneck = pre_bottleneck_convolutions_config['filters'][-1]
-            self.bottleneck_blocks = [metalearning_bottleneck_block_deconvupsample(ndims = ndims, data_format = data_format, previous_layer_filters = prev_layer_filters_bottleneck, use_batchnorm = self.use_batchnorm, **get_init_arguments_from_config(bottleneck_config,k,fields_in_bottleneck_cfg,fields_in_bottleneck_args)) for k in range(len(bottleneck_config['downsampling_factors']))]
+            self.bottleneck_blocks = [metalearning_bottleneck_block_deconvupsample(ndims = ndims, data_format = data_format, use_batchnorm = self.use_batchnorm, **get_init_arguments_from_config(bottleneck_config,k,fields_in_bottleneck_cfg,fields_in_bottleneck_args)) for k in range(len(bottleneck_config['downsampling_factors']))]
         elif bottleneck_upsampling == 'multilinear':
             fields_in_bottleneck_cfg = ['downsampling_factors', 'upsampling_factors', 'conv_kernel_sizes', 'n_convs', 'conv_downsampling_kernel_sizes']
             fields_in_bottleneck_args = ['downsampling_factor', 'upsampling_factor', 'conv_kernel_size', 'n_convs', 'conv_downsampling_kernel_size']
-            prev_layer_filters_bottleneck = pre_bottleneck_convolutions_config['filters'][-1]
-            self.bottleneck_blocks = [metalearning_bottleneck_block_multilinearupsample(ndims = ndims, data_format = data_format, previous_layer_filters = prev_layer_filters_bottleneck, use_batchnorm = self.use_batchnorm, **get_init_arguments_from_config(bottleneck_config,k,fields_in_bottleneck_cfg,fields_in_bottleneck_args)) for k in range(len(bottleneck_config['downsampling_factors']))]
+            self.bottleneck_blocks = [metalearning_bottleneck_block_multilinearupsample(ndims = ndims, data_format = data_format, use_batchnorm = self.use_batchnorm, **get_init_arguments_from_config(bottleneck_config,k,fields_in_bottleneck_cfg,fields_in_bottleneck_args)) for k in range(len(bottleneck_config['downsampling_factors']))]
         else:
             raise(ValueError('Invalid bottleneck block upsampling method'))
         self.n_bottleneck_blocks = tf.cast(len(self.bottleneck_blocks),tf.keras.backend.floatx())
+        self.bottleneck_blocks = sorted(self.bottleneck_blocks, key = lambda x: x.downsampling_factor, reverse=True)
 
         #process_regularizer_initializer_and_constraint_arguments(final_convolutions_config)
         self.final_convolutions = []
-        prev_layer_filters_finalconv = [bottleneck_config['filters']] + final_convolutions_config['filters'][:-1]
         final_convolution_stages = len(final_convolutions_config['filters'])
         last_two_conv_layers = get_conv_method(ndims)
+        final_convolutions_config = copy.deepcopy(final_convolutions_config)
         self.final_regular_conv_stages = final_convolutions_config.pop('final_regular_conv_stages',2)
         for k in range(final_convolution_stages-self.final_regular_conv_stages):
             conv_args = get_init_arguments_from_config(final_convolutions_config,k,fields_in_conv_cfg,fields_in_conv_args)
-            conv = metalearning_resnet(previous_layer_filters = prev_layer_filters_finalconv[k], use_batchnorm = self.use_batchnorm, data_format = data_format, dimensions = ndims, **conv_args)
+            conv_to_adjust_channel_number = metalearning_conv(dimensions = ndims, padding = 'same', data_format = data_format, **conv_args)
+            conv = metalearning_resnet(use_batchnorm = self.use_batchnorm, data_format = data_format, dimensions = ndims, **conv_args)
+            self.final_convolutions.append(conv_to_adjust_channel_number)
             self.final_convolutions.append(conv)
         for k in range(final_convolution_stages-self.final_regular_conv_stages,final_convolution_stages):
             self.final_convolutions.append(last_two_conv_layers(filters = final_convolutions_config['filters'][k], kernel_size = final_convolutions_config['kernel_sizes'][k],activation = tf.keras.activations.linear, padding='same',data_format=self.data_format,use_bias=final_convolutions_config['use_bias']))
@@ -209,14 +212,15 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
 
     @tf.function
     def generate_position_embeddings(self, batch_size, domain_shape):
-        pos_embeddings = tf.stack([tf.broadcast_to(tf.reshape(tf.cos(math.pi * tf.linspace(0.0,1.0,domain_shape[k])),[1 for _ in range(k)] + [-1] + [1 for _ in range(self.ndims-k-1)]), domain_shape) for k in range(self.ndims)],0 if self.data_format == 'channels_first' else -1)
+        linspace_start = tf.constant(0.0, tf.keras.backend.floatx())
+        linspace_end = tf.constant(1.0, tf.keras.backend.floatx())
+        pos_embeddings = tf.stack([tf.broadcast_to(tf.reshape(tf.cos(math.pi * tf.linspace(linspace_start,linspace_end,domain_shape[k])),[1 for _ in range(k)] + [-1] + [1 for _ in range(self.ndims-k-1)]), domain_shape) for k in range(self.ndims)],0 if self.data_format == 'channels_first' else -1)
         pos_embeddings = tf.expand_dims(pos_embeddings,0)
         pos_embeddings = tf.tile(pos_embeddings, [batch_size] + [1 for _ in range(self.ndims+1)])
         return pos_embeddings
 
     @tf.function
     def call(self,inp):
-
         rhses, dx = inp
 
         inp_shape = tf.shape(rhses)
@@ -246,14 +250,14 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
         if self.bottleneck_upsampling == 'deconv':
             bottleneck_result = self.bottleneck_blocks[0]([initial_conv_result,dense_inp])
             for layer in self.bottleneck_blocks[1:]:
-                bottleneck_result = bottleneck_result + layer([initial_conv_result,dense_inp])
+                bottleneck_result = layer([tf.concat([initial_conv_result, bottleneck_result], 1 if self.data_format == 'channels_first' else -1),dense_inp])
         elif self.bottleneck_upsampling == 'multilinear':
             bottleneck_result = self.bottleneck_blocks[0]([initial_conv_result,dense_inp,domain_sizes])
             for layer in self.bottleneck_blocks[1:]:
-                bottleneck_result = bottleneck_result + layer([initial_conv_result,dense_inp,domain_sizes])
-        bottleneck_result = bottleneck_result / self.n_bottleneck_blocks
+                bottleneck_result = layer([tf.concat([initial_conv_result, bottleneck_result], 1 if self.data_format == 'channels_first' else -1),dense_inp,domain_sizes])
+        #bottleneck_result = bottleneck_result / self.n_bottleneck_blocks
             
-        out = self.final_convolutions[0]([bottleneck_result, dense_inp])
+        out = self.final_convolutions[0]([tf.concat([initial_conv_result, bottleneck_result], 1 if self.data_format == 'channels_first' else -1), dense_inp])
         for layer in self.final_convolutions[1:-self.final_regular_conv_stages]:
             out = layer([out,dense_inp])
         for layer in self.final_convolutions[-self.final_regular_conv_stages:]:
@@ -270,6 +274,8 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
 
         rhses, dx = inputs
 
+        #ground_truth_scaled, ground_truth_scaling_factors = set_max_magnitude_in_batch_and_return_scaling_factors(ground_truth, 1.0)
+
         #rhses = tf.debugging.check_numerics(rhses, 'nan or inf in rhses. indices: ' + str(tf.where(tf.math.is_nan(rhses))))
         #ground_truth = tf.debugging.check_numerics(ground_truth, 'nan or inf in ground truth')
         #dx = tf.debugging.check_numerics(rhses, 'nan or inf in dxes')
@@ -279,8 +285,9 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
             tape.watch(self.trainable_variables)
             pred = self(inputs)
             #predk = tf.debugging.check_numerics(pred, 'nan or inf in pred')
-            #loss = tf.reduce_mean((ground_truth - pred)**2)
+
             loss = self.loss_fn(y_true=ground_truth,y_pred=pred,rhs=rhses,dx=dx)
+            #loss = self.loss_fn(y_true=ground_truth_scaled,y_pred=pred,rhs=tf.einsum('i,i...->i...', ground_truth_scaling_factors, ground_truth_scaled),dx=dx)
         #lossk = tf.debugging.check_numerics(loss, 'nan or inf in loss')
         grads = tape.gradient(loss,self.trainable_variables)
         '''
@@ -288,20 +295,8 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
             gradk = tf.debugging.check_numerics(grads[k], 'nan or inf in grad ' + str(k))
             #grads[k] = tf.clip_by_norm(grads[k],tf.constant(0.5))
         '''
-
-        grad_peak_log = tf.constant(-999.0)
-        for k in range(len(grads)):
-            peak_log = tf.math.log(tf.reduce_max(tf.abs(grads[k])))
-            if grad_peak_log < peak_log:
-                grad_peak_log = peak_log
         
         self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
-
-        model_peak_log = tf.constant(-999.0)
-        for variables in self.trainable_variables:
-            var_peak_log = tf.math.log(tf.reduce_max(tf.abs(variables)))
-            if model_peak_log < var_peak_log:
-                model_peak_log = var_peak_log
 
         return {'loss' : loss, 'mse': tf.reduce_mean((pred - ground_truth)**2)}# 'peak_rhs' : tf.reduce_max(tf.abs(rhses)), 'peak_soln': tf.reduce_max(tf.abs(ground_truth)), 'peak_pred':tf.reduce_max(tf.abs(pred)), 'model peak log' : model_peak_log, 'grad peak log' : grad_peak_log}
 
