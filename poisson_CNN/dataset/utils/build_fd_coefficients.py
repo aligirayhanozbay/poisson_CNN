@@ -3,6 +3,14 @@ import tensorflow as tf
 from .get_fd_coefficients import get_fd_coefficients
 
 def build_fd_coefficients(stencil_size, orders, ndims = None):
+    '''
+    Builds ndims ndims-dimensional tensors, where the kth tensor contains the finite difference coefficients with stencil_size[k] points for derivatives of orders[k] along the kth direction.
+
+    Inputs:
+    -stencil_size: int or list of ints, np.array or tf.Tensor. Number of stencil points per direction.
+    -orders: int or list of ints. Order of the derivative to be computed per direction.
+    -ndims: int. Number of spatial dimensions. Has to be supplied if stencil_size is an int.
+    '''
     #handle orders input argument
     if ndims is None:
         ndims = len(stencil_size)

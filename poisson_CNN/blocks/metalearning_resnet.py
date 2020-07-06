@@ -1,7 +1,6 @@
 import tensorflow as tf
 
-from .resnet import check_batchnorm_fused_enable
-
+from ..utils import check_batchnorm_fused_enable
 from ..layers import metalearning_conv
 
 class metalearning_resnet(tf.keras.models.Model):

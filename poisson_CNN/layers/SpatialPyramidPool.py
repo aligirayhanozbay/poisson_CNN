@@ -8,9 +8,9 @@ class SpatialPyramidPool(tf.keras.layers.Layer):
         self.ndims = ndims
         self.data_format = data_format
 
-        if pooling_type == 'average':
+        if pooling_type.lower() == 'average' or pooling_type.lower() == 'avg':
             self.pooling_func = tf.reduce_mean
-        elif pooling_type == 'max':
+        elif pooling_type.lower() == 'max':
             self.pooling_func = tf.reduce_max
         
         for k in range(len(levels)):

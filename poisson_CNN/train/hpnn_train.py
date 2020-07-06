@@ -76,4 +76,4 @@ if args.continue_from_checkpoint is not None:
 model.summary()
 #model.run_eagerly = True
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-model.fit(dataset,epochs=50,callbacks = cb)
+model.fit(dataset,epochs=config['training']['n_epochs'],callbacks = cb)

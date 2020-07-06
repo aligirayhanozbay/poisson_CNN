@@ -12,10 +12,17 @@ def meshgrid_of_single_domain_size_set(domain_sizes,npts,ndims):
     return mg
 
 class Upsample(tf.keras.layers.Layer):
-    def __init__(self, ndims, data_format = 'channels_first'):
+    def __init__(self, ndims, data_format = 'channels_first', resize_method = 'bilinear'):
+        '''
+        Init arguments:
+        -ndims: int. Number of spatial dimensions in the inputs
+        -data_format: string. 'channels_first' or 'channels_last'.
+        -resize_method: string or tf.image.ResizeMethod. See tf.image.resize documentation. Used only for 2d images, any other # of dimensions use multilinear.
+        '''
         super().__init__()
         self.data_format = data_format
         self.ndims = ndims
+        self.resize_method = resize_method
 
     @tf.function
     def call(self, inputs):
@@ -43,10 +50,10 @@ class Upsample(tf.keras.layers.Layer):
         else:
             if self.data_format == 'channels_first':
                 inp = tf.einsum('ij...->i...j', inp)
-            out = tf.image.resize(inp, output_shape, preserve_aspect_ratio = False, antialias = False)
+            out = tf.cast(tf.image.resize(inp, output_shape, method = self.resize_method, preserve_aspect_ratio = False, antialias = False),tf.keras.backend.floatx())
             if self.data_format == 'channels_first':
                 out = tf.einsum('i...j->ij...', out)
-
+        
         return out
 
 if __name__ == '__main__':

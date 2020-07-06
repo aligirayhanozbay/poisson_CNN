@@ -16,13 +16,13 @@ def convolution_and_bias_add_closure(data_format, conv_method, use_bias):
             output = tf.map_fn(lambda x: single_sample_convolution_and_bias_add(x[0],x[1],x[2]), [conv_input, kernels, biases], dtype = tf.keras.backend.floatx())
             return output
     else:
-        @tf.function
+        #@tf.function
         def single_sample_convolution(conv_input, kernel):
             conv_input = tf.expand_dims(conv_input, 0)
             output = conv_method(conv_input, kernel, padding = "VALID", data_format = data_format)
             return output[0,...]
 
-        @tf.function
+        #@tf.function
         def convolution_with_batched_kernels(conv_input, kernels):
             batch_size = tf.keras.backend.shape(conv_input)[0]
             output = tf.map_fn(lambda x: single_sample_convolution(x[0],x[1]), [conv_input, kernels], dtype = tf.keras.backend.floatx())

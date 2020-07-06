@@ -1,12 +1,15 @@
 import tensorflow as tf
 import copy
 
-from .resnet import check_batchnorm_fused_enable, choose_conv_layer, apply_advanced_padding_and_call_conv_layer, resnet
-from .metalearning_bottleneck_block import get_pooling_method
-from ..layers import Upsample, deconvupscale
+from .resnet import resnet
+from ..utils import check_batchnorm_fused_enable, choose_conv_layer, apply_advanced_padding_and_call_conv_layer, get_pooling_method
+from ..layers import *#Upsample, deconvupscale
+import pdb
+pdb.set_trace()
+#from ..layers.deconvupscale import deconvupscale
 
 class bottleneck_block_multilinearupsample(tf.keras.models.Model):
-    def __init__(self, ndims, downsampling_factor, filters, conv_kernel_size, data_format = 'channels_first', conv_activation = tf.keras.activations.linear, conv_use_bias = True, use_resnet = False, padding_mode='constant', constant_padding_value=0.0, n_convs = 1, upsampling_factor = None, conv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True):
+    def __init__(self, ndims, downsampling_factor, filters, conv_kernel_size, data_format = 'channels_first', conv_activation = tf.keras.activations.linear, conv_use_bias = True, use_resnet = False, padding_mode='constant', constant_padding_value=0.0, n_convs = 1, upsampling_factor = None, conv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True, resize_method = 'bilinear'):
 
         super().__init__()
 
@@ -63,7 +66,7 @@ class bottleneck_block_multilinearupsample(tf.keras.models.Model):
             else:
                 self._apply_convolution.append(apply_advanced_padding_and_call_conv_layer(padding_mode,layer,constant_padding_value))
             
-        self.upsample_layer = Upsample(ndims = ndims, data_format = self.data_format)
+        self.upsample_layer = Upsample(ndims = ndims, data_format = self.data_format, resize_method = resize_method)
 
     #@tf.function
     def call(self, inp):
@@ -92,7 +95,8 @@ class bottleneck_block_deconvupsample(bottleneck_block_multilinearupsample):
 
         deconv_init_args = {'filters':filters, 'kernel_size': deconv_kernel_size, 'upsample_ratio': upsampling_factor, 'data_format':data_format, 'activation': deconv_activation, 'use_bias': deconv_use_bias, 'dimensions': ndims}
         deconv_init_args = {**deconv_init_args, **deconv_initializer_constraint_regularizer_options}
-
+        #import pdb
+        #pdb.set_trace()
         self.upsample_layer = deconvupscale(**deconv_init_args)
 
     @tf.function

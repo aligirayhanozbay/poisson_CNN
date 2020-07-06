@@ -2,13 +2,8 @@ import tensorflow as tf
 import copy
 
 from ..layers import metalearning_conv, metalearning_deconvupscale, Upsample
+from ..utils import get_pooling_method, check_batchnorm_fused_enable
 from .metalearning_resnet import metalearning_resnet
-from .resnet import check_batchnorm_fused_enable
-
-def get_pooling_method(pool_downsampling_method, ndims):
-    pool_downsampling_method = pool_downsampling_method[0].upper() + pool_downsampling_method[1:].lower()
-    pooling_layer_name = 'tf.keras.layers.' + pool_downsampling_method + 'Pooling' + str(ndims) + 'D'
-    return eval(pooling_layer_name)
 
 class metalearning_bottleneck_block_deconvupsample(tf.keras.models.Model):
     def __init__(self, ndims, downsampling_factor, filters, conv_kernel_size, deconv_kernel_size, n_convs = 1, conv_padding_mode = 'constant', conv_constant_padding_value = 0.0, conv_conv_activation = tf.keras.activations.linear, conv_dense_activation = tf.keras.activations.linear, conv_pre_output_dense_units = [8,16], conv_use_bias = True, deconv_conv_activation = tf.keras.activations.linear, deconv_dense_activation = tf.keras.activations.linear, deconv_pre_output_dense_units = [8,16], deconv_use_bias = True, use_resnet = False, upsampling_factor = None, data_format = 'channels_first', conv_initializer_constraint_regularizer_options = {}, deconv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True):
