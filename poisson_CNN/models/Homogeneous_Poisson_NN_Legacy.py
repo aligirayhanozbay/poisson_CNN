@@ -4,7 +4,7 @@ import math, copy
 from .Homogeneous_Poisson_NN_Metalearning import get_init_arguments_from_config, process_normalizations, process_output_scaling_modes, process_regularizer_initializer_and_constraint_arguments
 from ..blocks import bottleneck_block_multilinearupsample, bottleneck_block_deconvupsample, resnet
 from ..layers import MergeWithAttention, Upsample, JacobiIterationLayer, Scaling
-from ..blocks.resnet import choose_conv_layer, check_batchnorm_fused_enable, apply_advanced_padding_and_call_conv_layer
+from ..utils import choose_conv_layer, check_batchnorm_fused_enable, apply_advanced_padding_and_call_conv_layer
 from ..dataset.utils import compute_domain_sizes
 
 class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):

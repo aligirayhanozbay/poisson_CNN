@@ -21,7 +21,6 @@ class SpatialPyramidPool(tf.keras.layers.Layer):
             elif len(levels[k]) != self.ndims:
                 raise(ValueError('Each SPP level must have a pool size with ndims or 1 element(s). Got ' + str(len(levels[k]))))
         self.nlevels = len(levels)
-        print(levels)
         self.levels = tf.constant(levels)
 
         self.receive_padded_values = receive_padded_values

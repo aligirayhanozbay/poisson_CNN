@@ -6,7 +6,7 @@ from .Homogeneous_Poisson_NN_Metalearning import get_init_arguments_from_config,
 from ..layers import deconvupscale
 from ..blocks import bottleneck_block_multilinearupsample, bottleneck_block_deconvupsample, resnet
 from ..dataset.utils import set_max_magnitude_in_batch_and_return_scaling_factors, set_max_magnitude_in_batch, build_fd_coefficients
-from ..blocks.resnet import apply_advanced_padding_and_call_conv_layer, choose_conv_layer, check_batchnorm_fused_enable
+from ..utils import apply_advanced_padding_and_call_conv_layer, choose_conv_layer, check_batchnorm_fused_enable
 
 class Homogeneous_Poisson_NN(tf.keras.models.Model):
     def __init__(self, ndims, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_upsampling = 'deconv', bottleneck_config = None, use_batchnorm = False, input_normalization = None, output_scaling = None):

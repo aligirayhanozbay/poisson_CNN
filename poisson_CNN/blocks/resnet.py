@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from ..utils import check_batchnorm_fused_enable, apply_advanced_padding_and_call_conv_layer
+from ..utils import check_batchnorm_fused_enable, apply_advanced_padding_and_call_conv_layer, choose_conv_layer
     
 
 class resnet(tf.keras.models.Model):

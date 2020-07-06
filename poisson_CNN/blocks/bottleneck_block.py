@@ -3,10 +3,7 @@ import copy
 
 from .resnet import resnet
 from ..utils import check_batchnorm_fused_enable, choose_conv_layer, apply_advanced_padding_and_call_conv_layer, get_pooling_method
-from ..layers import *#Upsample, deconvupscale
-import pdb
-pdb.set_trace()
-#from ..layers.deconvupscale import deconvupscale
+from ..layers import Upsample, deconvupscale
 
 class bottleneck_block_multilinearupsample(tf.keras.models.Model):
     def __init__(self, ndims, downsampling_factor, filters, conv_kernel_size, data_format = 'channels_first', conv_activation = tf.keras.activations.linear, conv_use_bias = True, use_resnet = False, padding_mode='constant', constant_padding_value=0.0, n_convs = 1, upsampling_factor = None, conv_initializer_constraint_regularizer_options = {}, downsampling_method = 'conv', conv_downsampling_kernel_size = None, pool_downsampling_method = 'max', use_batchnorm = False, batchnorm_trainable = True, resize_method = 'bilinear'):

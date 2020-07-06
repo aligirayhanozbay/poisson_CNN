@@ -1,8 +1,8 @@
 import tensorflow as tf
 import numpy as np
 from ..dataset.utils import build_fd_coefficients
-from ..blocks.resnet import choose_conv_layer
-from ..layers.metalearning_conv import convolution_and_bias_add_closure, convert_keras_dataformat_to_tf
+from ..utils import choose_conv_layer, convert_keras_dataformat_to_tf
+from ..layers.metalearning_conv import convolution_and_bias_add_closure
 
 class JacobiIterationLayer(tf.keras.layers.Layer):
     def __init__(self, stencil_sizes, orders, ndims = None, data_format = 'channels_first', n_iterations = 5):
