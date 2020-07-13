@@ -93,8 +93,8 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
             self.final_convolution_ops.append(self.final_convolutions[-1])
 
         #dx info
-        #dx_dense_layer_units = [100,100,bottleneck_deconv_config['filters']]
-        dx_dense_layer_units = [100,100,self.final_convolutions[-2].filters]
+        dx_dense_layer_units = [100,100,bottleneck_deconv_config['filters']]
+        #dx_dense_layer_units = [100,100,self.final_convolutions[-2].filters]
         dx_dense_layer_activations = [tf.nn.leaky_relu for _ in range(len(dx_dense_layer_units)-1)] + ['linear']
         self.dx_dense_layers = [tf.keras.layers.Dense(dx_dense_layer_units[k], activation = dx_dense_layer_activations[k]) for k in range(len(dx_dense_layer_units))]
 
@@ -210,7 +210,7 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         bottleneck_results = self.post_merge_resnet(self.post_merge_conv(tf.concat([self.non_bottleneck_conv(initial_conv_result), bottleneck_results], 1 if self.data_format == 'channels_first' else -1)))
         #'''
 
-        '''
+        #'''
         dx_info = self.dx_dense_layers[0](dense_inp)
         for layer in self.dx_dense_layers[1:]:
             dx_info = layer(dx_info)
@@ -229,7 +229,8 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
             out = layer(out)
         out = tf.einsum('ijkl,ij->ijkl', out, dx_info)
         out = self.final_convolution_ops[-1](out)
-
+        '''
+        
         if self.scaling is not None:
             out = self.scaling([out, rhses])
 

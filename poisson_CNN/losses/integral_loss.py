@@ -78,7 +78,7 @@ def sample_values_enclosing_GL_quadrature_points_from_grid(*neighbouring_indices
     
 
 class integral_loss(tf.keras.losses.Loss):
-    def __init__(self, n_quadpts, ndims = None, Lp_norm_power = 2, data_format = 'channels_first'):
+    def __init__(self, n_quadpts, ndims = None, Lp_norm_power = 2, data_format = 'channels_first', reduce_results = False):
         '''
         This is a loss function which calculates the integral (or continuous) Lp norm of the ground truth and the prediction instead of the discrete Lp norm. (y-t)^p is interpolated onto the Gauss-Legendre quadrature points using multilinear interpolation and then the integral of the quantity over the domain is approximated with the GL quadrature method.
 
@@ -87,6 +87,7 @@ class integral_loss(tf.keras.losses.Loss):
         -ndims: int. Number of spatial dimensions. Necessary only if an int value is passed as n_quadpts.
         -Lp_norm_power: int. Determines the order of the norm.
         -data_format: str. see tf.keras documentation.
+        -reduce_results: bool. If true, compute mean of per-sample and per-channel losses and return a scalar.
         '''
         super().__init__()
         if ndims is None:
@@ -97,6 +98,7 @@ class integral_loss(tf.keras.losses.Loss):
         self.ndims = ndims
         self.Lp_norm_power = Lp_norm_power
         self.data_format = data_format
+        self.reduce_results = reduce_results
 
         quadrature_coords = []
         quadrature_weights = []
@@ -113,6 +115,8 @@ class integral_loss(tf.keras.losses.Loss):
         self.corner_indices = tf.constant(binary_numbers_up_to_value(2**self.ndims),dtype=tf.int64)
         
         self.multilinear_interpolation_basis_polynomial_values_at_quadrature_coords = tf.map_fn(lambda x: tf.reduce_prod(tf.boolean_mask(self.quadrature_coords_meshgrid, x),0),self.corner_indices,dtype=self.quadrature_coords_meshgrid.dtype)
+
+        self.losses_einsum_str = 'ij...,...->ij...' if self.data_format == 'channels_first' else 'i...j,...->ij...'
 
     @tf.function
     def get_interpolation_matrix_row(self,corner_coord):
@@ -165,10 +169,12 @@ class integral_loss(tf.keras.losses.Loss):
         loss_at_quadrature_points = tf.einsum(loss_at_quadrature_points_einsum_str,self.multilinear_interpolation_basis_polynomial_values_at_quadrature_coords, interpolation_coefficients)
 
         #integrate using GL quadrature
-        losses_einsum_str = 'ij...,...->ij...' if self.data_format == 'channels_first' else 'i...j,...->ij...'
-        losses = tf.einsum(losses_einsum_str,loss_at_quadrature_points, self.quadrature_weights)
+        losses = tf.einsum(self.losses_einsum_str,loss_at_quadrature_points, self.quadrature_weights)
         losses = tf.reduce_sum(losses, axis = [k for k in range(2,self.ndims+2)])
         losses = tf.einsum('ij,i->ij',losses,tf.reduce_prod(domain_size,axis=1))/(2**self.ndims)
+
+        if self.reduce_results:
+            losses = tf.reduce_mean(losses)
         
         return losses
     
