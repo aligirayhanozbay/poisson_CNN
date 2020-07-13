@@ -1,0 +1,23 @@
+FROM nvidia/cuda-ppc64le:10.2-cudnn7-devel-ubuntu18.04
+RUN apt update && apt install -y git cmake openmpi-bin wget
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-py37_4.8.2-Linux-ppc64le.sh && chmod +x Miniconda3-py37_4.8.2-Linux-ppc64le.sh && ./Miniconda3-py37_4.8.2-Linux-ppc64le.sh -b
+SHELL ["/bin/bash", "-c"]
+
+ENV IBM_POWERAI_LICENSE_ACCEPT=yes
+ENV PATH /root/miniconda3/bin:$PATH 
+RUN conda init && source ~/.bashrc 
+RUN conda config --prepend channels https://public.dhe.ibm.com/ibmdl/export/pub/software/server/ibm-ai/conda/ 
+RUN source ~/.bashrc && conda install tensorflow-gpu tensorflow-probability scipy pip matplotlib
+RUN source ~/.bashrc && conda install -c conda-forge jupyterlab
+
+RUN cd / && git clone https://github.com/aligirayhanozbay/poisson_CNN.git
+RUN source ~/.bashrc && cd /poisson_CNN && pip3 install -e .[ppc64le]
+
+RUN cd / && git clone https://github.com/NVIDIA/AMGX
+RUN mkdir /AMGX/build
+RUN cd /AMGX/build && cmake ../ && make -j160 all
+
+RUN source ~/.bashrc && cd / && git clone https://github.com/shwina/pyamgx && cd pyamgx && export AMGX_DIR=/AMGX/ && conda install cython && pip3 install .
+ENV AMGX_DIR "/AMGX/"
+
+
