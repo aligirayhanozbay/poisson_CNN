@@ -22,8 +22,11 @@ setuptools.setup(
     install_requires=[
         "numpy",
         "opt-einsum",
-        "tensorflow-gpu>=2.0.0",
 	"pyamg"
     ],
-    python_requires='>=3.6',
+    extras_require = {
+	"amd64": ["tensorflow-gpu>=2.0.0"],
+	"ppc64le": ["tensorflow>=2.0.0"]
+    },
+    python_requires='>=3.6'
 )
