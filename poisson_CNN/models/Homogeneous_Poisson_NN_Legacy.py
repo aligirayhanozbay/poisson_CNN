@@ -65,12 +65,12 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         self.bottleneck_multilinear_blocks = [bottleneck_block_multilinearupsample(ndims = ndims, data_format = data_format, use_batchnorm = self.use_batchnorm, **get_init_arguments_from_config(bottleneck_multilinear_config,k,fields_in_bottleneck_cfg,fields_in_bottleneck_args)) for k in range(len(bottleneck_multilinear_config['downsampling_factors']))]
         self.bottleneck_multilinear_blocks = sorted(self.bottleneck_multilinear_blocks, key = lambda x: x.downsampling_factor, reverse=True)
 
-        self.non_bottleneck_conv = tf.keras.layers.Conv2D(filters = bottleneck_deconv_config['filters'], kernel_size = 5, activation = tf.nn.leaky_relu, padding = 'same')
+        self.non_bottleneck_conv = tf.keras.layers.Conv2D(filters = bottleneck_deconv_config['filters'], kernel_size = 5, activation = tf.nn.leaky_relu, padding = 'same', data_format = self.data_format)
     
         #merge bottleneck blocks
         #self.merge = MergeWithAttention(data_format = self.data_format)
-        self.post_merge_conv = tf.keras.layers.Conv2D(filters = bottleneck_deconv_config['filters'], kernel_size = 7, activation = tf.nn.leaky_relu, padding = 'same')
-        self.post_merge_resnet = resnet(2, filters = bottleneck_deconv_config['filters'], kernel_size = 7, activation = tf.nn.leaky_relu)
+        self.post_merge_conv = tf.keras.layers.Conv2D(filters = bottleneck_deconv_config['filters'], kernel_size = 7, activation = tf.nn.leaky_relu, padding = 'same', data_format = self.data_format)
+        self.post_merge_resnet = resnet(2, filters = bottleneck_deconv_config['filters'], kernel_size = 7, activation = tf.nn.leaky_relu, data_format = self.data_format)
 
         #final convolutions
         self.final_convolutions = []
@@ -83,7 +83,7 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         for k in range(final_convolution_stages-self.final_regular_conv_stages):
             conv_args = get_init_arguments_from_config(final_convolutions_config,k,fields_in_conv_cfg,fields_in_conv_args)
             conv_to_adjust_channel_number = conv_layer(data_format = data_format, padding = 'valid', **conv_args)
-            conv = resnet(ndims = 2, use_batchnorm = False, padding_mode = 'constant', **conv_args)
+            conv = resnet(ndims = 2, use_batchnorm = False, padding_mode = 'constant', data_format = self.data_format, **conv_args)
             self.final_convolutions.append(conv_to_adjust_channel_number)
             self.final_convolution_ops.append(apply_advanced_padding_and_call_conv_layer(final_convolutions_padding_mode, self.final_convolutions[-1], constant_padding_value = final_convolutions_constant_padding_value))
             self.final_convolutions.append(conv)
