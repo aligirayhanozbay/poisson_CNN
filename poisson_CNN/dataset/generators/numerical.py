@@ -5,66 +5,7 @@ import multiprocessing
 from collections.abc import Iterable
 
 from ..solvers import *
-
-
-@tf.function
-def image_resize(image, newshape, data_format = 'channels_first', resize_method = tf.image.ResizeMethod.BICUBIC):
-    '''
-    Helper function to resize images on the CPU in parallel
-    '''
-    imagedims = len(image.shape)
-    if data_format == 'channels_first':
-        if len(image.shape) == 4:
-            image = tf.transpose(image, (0,2,3,1))
-        elif len(image.shape) == 3:
-            image = tf.expand_dims(image, axis = 3)
-        elif len(image.shape) == 2:
-            image = tf.expand_dims(tf.expand_dims(image, axis = 2), axis = 0)
-    if isinstance(newshape, list) or isinstance(newshape, tuple) or len(newshape.shape) == 1:
-        newshape = tf.tile(tf.constant([newshape]), tf.constant([image.shape[0],1]))
-        
-    out = tf.cast(tf.map_fn(lambda x: tf.compat.v1.image.resize_images(x[0],x[1],method=resize_method,align_corners=True), (image, newshape), parallel_iterations=multiprocessing.cpu_count(), dtype = tf.float32), image.dtype)
-    
-    if data_format == 'channels_first':
-        if imagedims == 4:
-            out = tf.transpose(out, (0,3,1,2))
-        elif imagedims == 3:
-            out = out[...,0]
-        else:
-            out = out[0,...,0]
-            
-    return out
-
-@tf.function
-def set_max_magnitude(arr, max_magnitude = None, return_scaling_factors = False):
-    '''
-    Helper method to set the max magnitude in an array
-    '''
-    if max_magnitude == None:
-        max_magnitude = arr[1]
-        arr = arr[0]
-        
-    scaling_factor = max_magnitude/tf.reduce_max(tf.abs(arr))
-    if return_scaling_factors:
-        return arr * scaling_factor, scaling_factor
-    else:
-        return arr * scaling_factor
-    
-@tf.function
-def set_max_magnitude_in_batch(arr, max_magnitude, return_scaling_factors = False):
-    '''
-    Set max magnitudes within each batch in parallel
-    '''
-    if isinstance(max_magnitude, float):
-        #max_magnitude = tf.cast(tf.constant([max_magnitude for k in range(arr.shape[0])]), arr.dtype)
-        max_magnitude = tf.cast(tf.keras.backend.tile(tf.constant([max_magnitude]), [tf.shape(arr)[0]]), arr.dtype)
-
-    if return_scaling_factors:
-        return_dtype = (arr.dtype, arr.dtype)
-    else:
-        return_dtype = arr.dtype
-    
-    return tf.map_fn(lambda x: set_max_magnitude(x, return_scaling_factors = return_scaling_factors), (arr, max_magnitude), dtype = return_dtype, parallel_iterations = multiprocessing.cpu_count())
+from ..utils import *
 
 def generate_random_RHS(batch_size, n_outputpts, smoothness = None, resize_method = tf.image.ResizeMethod.BICUBIC, max_magnitude = np.inf):
     
@@ -143,7 +84,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     rhs_max_magnitude: Float. Max magnitude for generated rhses
     boundary_max_magnitude: Dict containing the entries 'top', 'bottom', 'right' and 'left'. Sets max magnitude for the corresponding boundaries.
     nonzero_boundaries: See generate_random_boundaries
-    solver_method: 'multigrid' for PyAMG multigrid solver, 'cholesky' for Cholesky decomposition solver (on GPU) or supply a callable taking arguments (rhses, boundaries, dx)
+    solver_method: 'multigrid' for PyAMG multigrid solver, 'multigrid_gpu' for pyamgx GPU multigrid solver, 'cholesky' for Cholesky decomposition solver (on GPU) or supply a callable taking arguments (rhses, boundaries, dx)
     return_rhs: If set to True, the RHSes will be appended to the output
     return_boundaries: If set to True, the BCs will be appended to the output
     return_dx: If set to True, the grid spacing(s) will be appended to the output
@@ -176,10 +117,12 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
             solver_method = cholesky_poisson_solve
         elif solver_method == 'multigrid':
             solver_method = multigrid_poisson_solve
+        elif solver_method == 'multigrid_gpu':
+            solver_method = lambda *args: multigrid_poisson_solve(*args, use_pyamgx = True)
         else:
-            raise(ValueError('solver_method must be a function or one of cholesky or multigrid'))
+            raise(ValueError('solver_method must be a function or one of cholesky, multigrid or multigrid_gpu'))
 
-    out = tf.constant(solver_method(rhses, boundaries,dx))
+    out = tf.constant(solver_method(rhses, boundaries,dx), dtype = tf.keras.backend.floatx())
 
     if normalize_by_domain_size:
         domainsize = tf.squeeze(dx**len(output_shape)) * np.prod(np.array(output_shape)-1)
@@ -187,7 +130,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     
     inp = []
     if return_rhs:
-        inp.append(rhses)
+        inp.append(tf.cast(rhses, tf.keras.backend.floatx()))
     if return_boundaries:
         inp.append(boundaries)
     if return_dx:

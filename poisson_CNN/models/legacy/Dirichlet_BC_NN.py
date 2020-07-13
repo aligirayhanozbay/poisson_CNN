@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 import sys
 sys.path.append('..')
 
-from ..layers import WeightedContractionLayer
-from ..layers import Upsample
+from ...layers import WeightedContractionLayer
+from ...layers import Upsample
 from .Model_With_Integral_Loss import Model_With_Integral_Loss_ABC
 from .custom_blocks import *
                  
