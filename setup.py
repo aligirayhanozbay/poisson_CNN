@@ -21,12 +21,10 @@ setuptools.setup(
     ],
     install_requires=[
         "numpy",
+        "tf-nightly",
+	"tfp-nightly",
         "opt-einsum",
 	"pyamg"
     ],
-    extras_require = {
-	"amd64": ["tensorflow-gpu>=2.0.0"],
-	"ppc64le": ["tensorflow>=2.0.0"]
-    },
     python_requires='>=3.6'
 )
