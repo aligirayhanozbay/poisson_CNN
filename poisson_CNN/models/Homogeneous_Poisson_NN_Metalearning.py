@@ -4,20 +4,34 @@ import math
 
 from ..layers import metalearning_conv, metalearning_deconvupscale
 from ..blocks import metalearning_bottleneck_block_deconvupsample, metalearning_bottleneck_block_multilinearupsample, metalearning_resnet
-from ..blocks.resnet import check_batchnorm_fused_enable
 from ..dataset.utils import set_max_magnitude_in_batch_and_return_scaling_factors, set_max_magnitude_in_batch, build_fd_coefficients
-from ..dataset.generators.reverse import choose_conv_method
+from ..utils import check_batchnorm_fused_enable, choose_conv_layer, choose_conv_method, get_peak_magnitudes_in_each_sample
 
 def get_init_arguments_from_config(cfg,k,fields_in_cfg,fields_in_args):
-    args = copy.deepcopy(cfg)
+    '''
+    Extracts arguments like this:
+    cfg = {'key1': 3, 'key2': [0,1,2,3,4], 'key3': [6,7,8,9,10]}
+    k = 2
+    fields_in_cfg = ['key2', 'key3']
+    fields_in_args = ['key2p', 'key3p']
+    => output = {'key1': 3, 'key2p': 2, 'key3p': 8} 
 
-    for field_in_cfg,field_in_args in zip(fields_in_cfg,fields_in_args):
-        del args[field_in_cfg]
-        args[field_in_args] = cfg[field_in_cfg][k]
-    
-    return args
+    Inputs:
+    -cfg: dict. contains original data.
+    -k: int. the output will have the key-val pair fields_in_args[i]:cfg[fields_in_cfg[i][k].
+    -fields_in_cfg: list of strings. keys to look for in cfg.
+    -fields_in_args : list of strings. fields_in_args[i] will be the key replacing fields_in_cfg[i] in the output.
+    '''
+    return {**{key:cfg[key] for key in filter(lambda x: x not in fields_in_cfg, cfg.keys())},**{arg_key:cfg[cfg_key][k] for arg_key,cfg_key in zip(fields_in_args, fields_in_cfg)}}
 
 def process_normalizations(normalizations):
+    '''
+    Processes input normalization modes.
+    Inputs:
+    -normalizations: dict. If a given normalization type is present with the corresponding value, it is retained. Else, the default value in normalization_default_values is assigned.
+    Outputs:
+    A dict containing containing key-val pairs normalization_type:enabled_or_not
+    '''
     normalization_types = ['rhs_max_magnitude']
     normalization_default_values = [False]
     if normalizations is None:
@@ -55,9 +69,6 @@ def process_regularizer_initializer_and_constraint_arguments(config_dict):
         elif ('constraint' in key):
             config_dict[key] = eval(val)
 
-def get_conv_method(ndims):
-    conv_layer_name = 'tf.keras.layers.Conv' + str(ndims) + 'D'
-    return eval(conv_layer_name)
     
 class metalearning_conv_and_batchnorm(tf.keras.models.Model):
     def __init__(self,conv,batchnorm):
@@ -71,12 +82,8 @@ class metalearning_conv_and_batchnorm(tf.keras.models.Model):
         out = self.batchnorm(out)
         return out
 
-@tf.function
-def get_peak_magnitudes_in_each_sample(batch):
-    return tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)), batch)
-
 class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
-    def __init__(self, ndims, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_upsampling = 'deconv', bottleneck_config = None, use_batchnorm = False, input_normalization = None, output_scaling = None):
+    def __init__(self, ndims,  data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_deconv_config = None, bottleneck_multilinear_config = None, input_normalization = None, output_scaling = None, use_batchnorm = False, postsmoother_iterations = 5):
 
         super().__init__()
 
@@ -142,7 +149,7 @@ class Homogeneous_Poisson_NN_Metalearning(tf.keras.models.Model):
         #process_regularizer_initializer_and_constraint_arguments(final_convolutions_config)
         self.final_convolutions = []
         final_convolution_stages = len(final_convolutions_config['filters'])
-        last_two_conv_layers = get_conv_method(ndims)
+        last_two_conv_layers = choose_conv_layer(ndims)
         final_convolutions_config = copy.deepcopy(final_convolutions_config)
         self.final_regular_conv_stages = final_convolutions_config.pop('final_regular_conv_stages',2)
         for k in range(final_convolution_stages-self.final_regular_conv_stages):

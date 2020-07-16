@@ -23,6 +23,10 @@ class Upsample(tf.keras.layers.Layer):
         self.data_format = data_format
         self.ndims = ndims
         self.resize_method = resize_method
+        
+        if self.ndims != 2 and resize_method != 'bilinear':
+            import warnings
+            warnings.warn('Upsample - Currently only multilinear upsampling is supported for ndims other than 2')
 
     @tf.function
     def call(self, inputs):

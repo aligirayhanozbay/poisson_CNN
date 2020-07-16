@@ -5,6 +5,7 @@ import math
 import string
 
 from ..utils import *
+from ...utils import choose_conv_method
 
 def handle_grid_parameters_range(value_range, ndims):
     if not (isinstance(value_range, tf.Tensor) or isinstance(value_range, np.ndarray)):
@@ -18,16 +19,6 @@ def handle_grid_parameters_range(value_range, ndims):
     assert tf.reduce_all((value_range[:,1] - value_range[:,0]) >= 0.0), 'Dims ' + str(list(tf.reshape(tf.where((value_range[:,1]-value_range[:,0])<0), (-1,)).numpy())) + ' had upper bound of random range smaller than the lower bound'
     assert tf.reduce_all(value_range[:,0] >= 0.0), 'Dims ' + str(list(tf.reshape(tf.where(value_range[:,0]<0), (-1,)).numpy())) + ' had lower bounds of random range below 0'
     return value_range #shape of value_range is (ndims,2)
-
-def choose_conv_method(ndims):
-    if ndims == 1:
-        return tf.keras.backend.conv1d
-    elif ndims == 2:
-        return tf.keras.backend.conv2d
-    elif ndims == 3:
-        return tf.keras.backend.conv3d
-    else:
-        raise(NotImplementedError('Convolutions above 3D are not available yet'))
 
 def process_normalizations(normalizations):
 
