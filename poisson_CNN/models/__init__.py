@@ -2,3 +2,4 @@ from .Homogeneous_Poisson_NN_Metalearning import Homogeneous_Poisson_NN_Metalear
 from .Homogeneous_Poisson_NN import Homogeneous_Poisson_NN
 from .Homogeneous_Poisson_NN_Autoencoder import Homogeneous_Poisson_NN_Autoencoder_2D, Homogeneous_Poisson_NN_AE_Decoder_Fourier
 from .Homogeneous_Poisson_NN_Legacy import Homogeneous_Poisson_NN_Legacy
+from .Dirichlet_BC_NN_Legacy import Dirichlet_BC_NN_Legacy_2

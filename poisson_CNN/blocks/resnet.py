@@ -22,7 +22,7 @@ class resnet(tf.keras.models.Model):
                     batchnorm_axis = -1
             except:
                 batchnorm_axis = 1
-            enable_fused_batchnorm = check_batchnorm_fused_enable()
+            enable_fused_batchnorm = check_batchnorm_fused_enable(ndims = ndims)
             self.batchnorm0 = tf.keras.layers.BatchNormalization(axis = batchnorm_axis, trainable = batchnorm_trainable, fused = enable_fused_batchnorm)
             self.batchnorm1 = tf.keras.layers.BatchNormalization(axis = batchnorm_axis, trainable = batchnorm_trainable, fused = enable_fused_batchnorm)
 
