@@ -1,8 +1,8 @@
-import copy, math
+import copy, math, warnings
 import tensorflow as tf
 
 from .Homogeneous_Poisson_NN_Metalearning import get_init_arguments_from_config, process_normalizations, process_output_scaling_modes, process_regularizer_initializer_and_constraint_arguments
-from ..layers import Upsample, SpatialPyramidPool
+from ..layers import Upsample, SpatialPyramidPool, JacobiIterationLayer
 from ..blocks import resnet
 from ..utils import check_batchnorm_fused_enable, apply_advanced_padding_and_call_conv_layer, choose_conv_layer
 from ..dataset.utils import set_max_magnitude_in_batch, compute_domain_sizes
@@ -36,6 +36,9 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
 
         #last number of filters for the BC convs and the MLP layers must be identical since this is the # of modes used for the x-direction sinh basis functions
         assert boundary_conv_config['filters'][-1] == domain_info_mlp_config['units'][-1]
+        if boundary_conv_config['filters'][-1] > 27 and (tf.keras.backend.floatx() == 'float32'):
+            warnings.warn(str(boundary_conv_config['filters'][-1]) + ' sinh modes chosen may lead to NaN values with float32 precision. Consider using fewer than 28 when using float32.')
+        
         self.x_dir_nmodes = domain_info_mlp_config['units'][-1]
 
         #convolutions on the BC info
@@ -63,7 +66,7 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
         self._einsum_output_str = 'bmx...' if self.data_format == 'channels_first' else 'bx...m'
 
         #dense layers for the domain info + SPP result from boundary convs
-        self.spp = SpatialPyramidPool(ndims = self.ndims, data_format = self.data_format, receive_padded_values = False, **spp_config)
+        self.spp = SpatialPyramidPool(ndims = self.ndims-1, data_format = self.data_format, receive_padded_values = False, **spp_config)
         fields_in_dense_cfg = ['units', 'activations']
         fields_in_dense_args = ['units', 'activation']
         self.domain_info_dense_layers = []
@@ -128,13 +131,16 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
 
         #sinh values as the x direction component of the solution
         sinh_values = self.build_series_x_dir_components(x_output_resolution)
-
+        
         #einsum the three components together
         out = tf.einsum(self._einsum_boundary_conv_input_str + ',mx,bm->' + self._einsum_output_str, bc_conv_result, sinh_values, dense_result)
 
         #apply 2d convs
         for layer in self.final_convolution_ops:
             out = layer(out)
+	
+        out = set_max_magnitude_in_batch(out, tf.constant(1.0,tf.keras.backend.floatx()))
+        out = tf.reshape(out, tf.stack([bc_shape[0],bc_shape[1],x_output_resolution,bc_shape[2]]))
 
         #apply post smoothing if desired
         if self.postsmoother is not None:

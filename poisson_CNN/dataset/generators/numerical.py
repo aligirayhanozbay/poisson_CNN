@@ -48,7 +48,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
     
     Outputs a dict containing entries 'left', 'right', 'bottom' and 'top' with values as tf.Tensors of shape (batch_size, 1, n) or (batch_size, n) depending on whether return_with_expanded_dims is True, where n is the entry of n_outputpts corresponding to the boundary in question
     '''
-    
+
     boundary_lengths = {'left' : n_outputpts[1], 'right' : n_outputpts[1], 'top' : n_outputpts[0], 'bottom' : n_outputpts[0]}
     if isinstance(smoothness, int):
         smoothness = {'left' : smoothness, 'right' : smoothness, 'top' : smoothness, 'bottom' : smoothness}

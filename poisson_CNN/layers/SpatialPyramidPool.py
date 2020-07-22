@@ -66,9 +66,11 @@ class SpatialPyramidPool(tf.keras.layers.Layer):
         return tf.concat(results,1)
 
 if __name__ == '__main__':
-    mod = SpatialPyramidPool([[2,2],3],2)
+    mod = SpatialPyramidPool([[2,2],3,5,8],2)
     inp = tf.random.uniform((10,5,2100,2000))
     q=mod(inp)
+    import pdb
+    pdb.set_trace()
     import time
     t0 = time.time()
     for k in range(10):
@@ -85,6 +87,7 @@ if __name__ == '__main__':
     for k in range(10):
         print(mod([inp,pad_mask]).shape)
     print((time.time() - t0)/10)
+    
         
             
         
