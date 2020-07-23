@@ -96,6 +96,9 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
 
         self.postsmoother = JacobiIterationLayer([3,3],[2,2],self.ndims, data_format = self.data_format, n_iterations = postsmoother_iterations) if postsmoother_iterations > 0 else None
 
+        self.direction_perpendicular_to_bc = 2 if self.data_format == 'channels_first' else 1
+        self.concat_bc_output_slice = tuple([Ellipsis, slice(1,None)] + [slice(0,None) for _ in range(self.ndims-1)])
+
     @tf.function
     def get_domain_shape(self,inpshape):
         return (inpshape[2:] if self.data_format == 'channels_first' else inpshape[1:-1])
@@ -141,6 +144,7 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
 	
         out = set_max_magnitude_in_batch(out, tf.constant(1.0,tf.keras.backend.floatx()))
         out = tf.reshape(out, tf.stack([bc_shape[0],bc_shape[1],x_output_resolution,bc_shape[2]]))
+        out = tf.concat([tf.expand_dims(bc,self.direction_perpendicular_to_bc), out[self.concat_bc_output_slice]], self.direction_perpendicular_to_bc)
 
         #apply post smoothing if desired
         if self.postsmoother is not None:
