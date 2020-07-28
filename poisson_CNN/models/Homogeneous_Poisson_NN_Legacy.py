@@ -5,14 +5,16 @@ from .Homogeneous_Poisson_NN_Metalearning import get_init_arguments_from_config,
 from ..blocks import bottleneck_block_multilinearupsample, bottleneck_block_deconvupsample, resnet
 from ..layers import MergeWithAttention, Upsample, JacobiIterationLayer, Scaling
 from ..utils import choose_conv_layer, check_batchnorm_fused_enable, apply_advanced_padding_and_call_conv_layer
-from ..dataset.utils import compute_domain_sizes
+from ..dataset.utils import compute_domain_sizes, split_indices
 
 class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
-    def __init__(self, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_deconv_config = None, bottleneck_multilinear_config = None, input_normalization = None, output_scaling = None, use_batchnorm = False, postsmoother_iterations = 5, use_scaling = False, scaling_config = None):
+    def __init__(self, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_deconv_config = None, bottleneck_multilinear_config = None, input_normalization = None, output_scaling = None, use_batchnorm = False, postsmoother_iterations = 5, use_scaling = False, scaling_config = None, gradient_accumulation_steps = None):
 
         super().__init__()
         ndims = 2
         self.ndims = ndims
+
+        self.gradient_accumulation_steps = gradient_accumulation_steps
 
         self.input_normalization = process_normalizations(input_normalization)
         self._input_normalization_has_to_be_performed = tf.reduce_any([bool(x) for x in self.input_normalization.values()])
@@ -248,13 +250,30 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
 
         rhses, dx = inputs
         dx = dx[...,:1]
+
+        if self.gradient_accumulation_steps is None:
+            with tf.GradientTape() as tape:
+                tape.watch(self.trainable_variables)
+                pred = self(inputs)
+                loss = self.loss_fn(y_true=ground_truth,y_pred=pred,rhs=rhses,dx=tf.concat([dx,dx],1))
+            grads = tape.gradient(loss,self.trainable_variables)
+        else:
+            batch_size = tf.shape(rhses)[0]
+            indices = split_indices(batch_size,self.gradient_accumulation_steps)
+            grads = None
+            for grad_acc_step in range(self.gradient_accumulation_steps):
+                with tf.GradientTape() as tape:
+                    tape.watch(self.trainable_variables)
+                    step_start_idx = indices[grad_acc_step]
+                    step_end_idx = indices[grad_acc_step+1]
+                    step_rhs = rhses[step_start_idx:step_end_idx]
+                    step_dx = dx[step_start_idx:step_end_idx]
+                    step_ground_truth = ground_truth[step_start_idx:step_end_idx]
+                    pred = self([step_rhs,step_dx])
+                    loss = self.loss_fn(y_true=step_ground_truth, y_pred = pred, rhs = step_rhs, dx = tf.concat([step_dx,step_dx],1))
+                grads = tape.gradient(loss,self.trainable_variables) if grads is None else [current_grads+new_grads for current_grads,new_grads in zip(grads,tape.gradient(loss,self.trainable_variables))]
+            grads = [g/self.gradient_accumulation_steps for g in grads]
         
-        with tf.GradientTape() as tape:
-            tape.watch(self.trainable_variables)
-            pred = self(inputs)
-            loss = self.loss_fn(y_true=ground_truth,y_pred=pred,rhs=rhses,dx=tf.concat([dx,dx],1))
-        grads = tape.gradient(loss,self.trainable_variables)
-                
         self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
 
         return {'loss' : loss, 'mse': tf.reduce_mean((pred - ground_truth)**2), 'lr': self.optimizer.learning_rate}

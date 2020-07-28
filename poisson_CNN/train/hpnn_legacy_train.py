@@ -39,7 +39,7 @@ loss = loss_wrapper(**config['training']['loss_parameters'])
 dataset = numerical_dataset_generator(**config['dataset'])
 
 inp,tar=dataset.__getitem__(0)
-out = model(inp)
+out = model([inp[0][:1],inp[1][:1]])
 model.compile(loss=loss,optimizer=optimizer)
 cb = [
     tf.keras.callbacks.ModelCheckpoint(checkpoint_dir + '/chkpt.checkpoint',save_weights_only=True,save_best_only=True,monitor = 'loss'),
