@@ -187,11 +187,10 @@ class Dirichlet_BC_NN_Metalearning(tf.keras.models.Model):
 
         inputs, ground_truth = data
         bc, dx = inputs
-        x_output_resolution = tf.shape(ground_truth)[
-            2 if self.data_format == 'channels_first' else 1]
+        x_output_resolution = tf.shape(ground_truth)[2 if self.data_format == 'channels_first' else 1]
 
-        if tf.shape(dx)[1] == 1:
-            dx = tf.tile(dx, [1, self.ndims])
+        
+        dx = tf.tile(dx, [1, self.ndims])#fix this later
 
         with tf.GradientTape() as tape:
             tape.watch(self.trainable_variables)
