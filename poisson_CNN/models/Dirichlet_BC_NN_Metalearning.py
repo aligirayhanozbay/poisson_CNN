@@ -30,7 +30,7 @@ class Dirichlet_BC_NN_Metalearning(tf.keras.models.Model):
             raise(ValueError('Provide a config for the domain info MLP.'))
 
         # last number of filters for the BC convs and the MLP layers must be identical since this is the # of modes used for the x-direction sinh basis functions
-        # assert boundary_conv_config['filters'][-1] == domain_info_mlp_config['units'][-1]
+        assert boundary_conv_config['filters'][-1] == domain_info_mlp_config['units'][-1]
         if boundary_conv_config['filters'][-1] > 27 and (tf.keras.backend.floatx() == 'float32'):
             warnings.warn(str(boundary_conv_config['filters'][-1]) +
                           ' sinh modes chosen may lead to NaN values with float32 precision. Consider using fewer than 28 when using float32.')
@@ -227,11 +227,11 @@ if __name__ == '__main__':
         'use_bias': True
     }
     sppcfg = {
-        'levels': [[2, 2], 3, 5, 8],
+        'levels': [[2], 3, 5, 8],
         'pooling_type': 'average'
     }
     mlpcfg = {
-        'units': [250, 125, 40],
+        'units': [250, 125, 22],
         'activations': [tf.nn.leaky_relu, tf.nn.leaky_relu, 'softmax']
     }
     fccfg = {
