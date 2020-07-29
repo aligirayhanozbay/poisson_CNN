@@ -57,16 +57,16 @@ class Dirichlet_BC_NN_Metalearning(tf.keras.models.Model):
         self._einsum_boundary_conv_input_str = 'bm...' if self.data_format == 'channels_first' else 'b...m'
         self._einsum_output_str = 'bmx...' if self.data_format == 'channels_first' else 'bx...m'
 
-        # #dense layers for the domain info + SPP result from boundary convs
-        # self.spp = SpatialPyramidPool(ndims = self.ndims-1, data_format = self.data_format, receive_padded_values = False, **spp_config)
-        # fields_in_dense_cfg = ['units', 'activations']
-        # fields_in_dense_args = ['units', 'activation']
-        # self.domain_info_dense_layers = []
-        # for k in range(len(domain_info_mlp_config['units'])):
-        #     dense_args = get_init_arguments_from_config(domain_info_mlp_config,k,fields_in_dense_cfg,fields_in_dense_args)
-        #     if k != 0:
-        #         self.domain_info_dense_layers.append(tf.keras.layers.LayerNormalization())
-        #     self.domain_info_dense_layers.append(tf.keras.layers.Dense(**dense_args))
+        #dense layers for the domain info + SPP result from boundary convs
+        self.spp = SpatialPyramidPool(ndims = self.ndims-1, data_format = self.data_format, receive_padded_values = False, **spp_config)
+        fields_in_dense_cfg = ['units', 'activations']
+        fields_in_dense_args = ['units', 'activation']
+        self.domain_info_dense_layers = []
+        for k in range(len(domain_info_mlp_config['units'])):
+            dense_args = get_init_arguments_from_config(domain_info_mlp_config,k,fields_in_dense_cfg,fields_in_dense_args)
+            if k != 0:
+                self.domain_info_dense_layers.append(tf.keras.layers.LayerNormalization())
+            self.domain_info_dense_layers.append(tf.keras.layers.Dense(**dense_args))
 
         # convolutions on the assembled (ndims+2)-dimensional tensor
         self.final_convolutions = []
@@ -145,20 +145,19 @@ class Dirichlet_BC_NN_Metalearning(tf.keras.models.Model):
         for layer in self.boundary_convolutions[1:]:
             bc_conv_result = layer([bc_conv_result, dense_inp])
 
-        # mlp layers
-        # bc_conv_spp_result = self.spp(bc_conv_result)
-        # dense_inp = tf.concat([dx,domain_sizes,bc_conv_spp_result],1)
-        # dense_result = self.domain_info_dense_layers[0](dense_inp)
-        # for layer in self.domain_info_dense_layers[1:]:
-        #     dense_result = layer(dense_result)
+        #mlp layers
+        bc_conv_spp_result = self.spp(bc_conv_result)
+        dense_inp = tf.concat([dx,domain_sizes,bc_conv_spp_result],1)
+        dense_result = self.domain_info_dense_layers[0](dense_inp)
+        for layer in self.domain_info_dense_layers[1:]:
+            dense_result = layer(dense_result)
 
         # sinh values as the x direction component of the solution
         sinh_values = self.build_series_x_dir_components(x_output_resolution)
 
         # einsum the three components together
-        # out = tf.einsum(self._einsum_boundary_conv_input_str + ',mx,bm->' + self._einsum_output_str, bc_conv_result, sinh_values, dense_result)
-        out = tf.einsum(self._einsum_boundary_conv_input_str + ',mx->' +
-                        self._einsum_output_str, bc_conv_result, sinh_values)
+        out = tf.einsum(self._einsum_boundary_conv_input_str + ',mx,bm->' + self._einsum_output_str, bc_conv_result, sinh_values, dense_result)
+        # out = tf.einsum(self._einsum_boundary_conv_input_str +',mx->'+self._einsum_output_str, bc_conv_result, sinh_values)
 
         # apply 2d convs
         out = tf.concat([out, pos_embeddings],
