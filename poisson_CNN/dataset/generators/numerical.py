@@ -71,7 +71,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
                 boundaries[boundary] = tf.expand_dims(boundaries[boundary], axis = 2)
     return boundaries
 
-def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]], random_dx_range = [0.005,0.05], normalize_by_domain_size = False):
+def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]], random_dx_range = [0.005,0.05], normalize_by_domain_size = False, aspect_ratio_range = None, aspect_ratio_flip_probability = 0.5):
     '''
     Generates Poisson equation RHS-solution pairs with 'random' RHS functions.
 
@@ -93,10 +93,22 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
 
     Outputs a tf.Tensor of shape (batch_size * smoothness_levels, n[0], n[1])
     '''
-
-    if output_shape == 'random':
-        output_shape = [np.random.randint(random_output_shape_range[k][0], high = random_output_shape_range[k][1]) for k in range(len(random_output_shape_range))]
     
+    if output_shape == 'random' and aspect_ratio_range is not None:
+        aspect_ratio_range = tf.convert_to_tensor(aspect_ratio_range)
+        aspect_ratios = generate_uniformly_distributed_random_aspect_ratios(ndims = 2, min_ar = aspect_ratio_range[:,0], max_ar = aspect_ratio_range[:,1], samples = 1, flip_probability = aspect_ratio_flip_probability)
+        output_shape, dx_generated = generate_output_shapes_and_grid_spacings_from_aspect_ratios(aspect_ratios, random_output_shape_range, [random_dx_range], constant_dx = True, samples = batch_size)
+        output_shape = np.array(output_shape).tolist()
+        dx = dx_generated[:,:1] if dx == 'random' else dx
+    else:
+        if output_shape == 'random':
+            output_shape = [np.random.randint(random_output_shape_range[k][0], high = random_output_shape_range[k][1]) for k in range(len(random_output_shape_range))]
+
+        if dx == 'random':
+            dx = tf.random.uniform((batch_size,1))*(random_dx_range[1] - random_dx_range[0]) + random_dx_range[0]
+        elif isinstance(dx, float):
+            dx = np.ones((batch_size,1))*dx
+            
     if rhses == 'random':
         rhses = generate_random_RHS(batch_size, output_shape, smoothness = rhs_smoothness, max_magnitude = rhs_max_magnitude)
     elif rhses == 'zero':
@@ -106,11 +118,6 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
         boundaries = generate_random_boundaries(output_shape, batch_size = batch_size, max_magnitude = boundary_max_magnitude, return_with_expanded_dims = True, nonzero_boundaries = nonzero_boundaries, smoothness = boundary_smoothness)
     elif boundaries == 'zero' or boundaries == 'homogeneous':
         boundaries = generate_random_boundaries(output_shape, batch_size = batch_size, return_with_expanded_dims = True, nonzero_boundaries = [])
-
-    if dx == 'random':
-        dx = tf.random.uniform((batch_size,1))*(random_dx_range[1] - random_dx_range[0]) + random_dx_range[0]
-    elif isinstance(dx, float):
-        dx = np.ones((batch_size,1))*dx
     
     if not callable(solver_method):
         if solver_method == 'cholesky':
