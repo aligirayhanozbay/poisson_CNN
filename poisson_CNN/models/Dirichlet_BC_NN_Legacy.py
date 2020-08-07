@@ -110,6 +110,16 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
         sinh_arguments = tf.einsum('m,x->mx',mode_numbers,math.pi*(xbar-1))
         sinh_values = set_max_magnitude_in_batch(tf.math.sinh(sinh_arguments), tf.constant(1.0,dtype=xbar.dtype))
         return sinh_values
+
+    @tf.function
+    def generate_position_embeddings(self, batch_size, domain_shape):
+        linspace_start = tf.cast(0.0,tf.keras.backend.floatx())
+        linspace_end = tf.cast(1.0,tf.keras.backend.floatx())
+        pi = tf.cast(math.pi,tf.keras.backend.floatx())
+        pos_embeddings = tf.stack([tf.broadcast_to(tf.reshape(tf.cos(pi * tf.linspace(linspace_start,linspace_end,domain_shape[k])),[1 for _ in range(k)] + [-1] + [1 for _ in range(self.ndims-k-1)]), domain_shape) for k in range(self.ndims)],0 if self.data_format == 'channels_first' else -1)
+        pos_embeddings = tf.expand_dims(pos_embeddings,0)
+        pos_embeddings = tf.tile(pos_embeddings, [batch_size] + [1 for _ in range(self.ndims+1)])
+        return pos_embeddings
     
     @tf.function
     def call(self,inp):
@@ -118,16 +128,18 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
         bc_shape = tf.shape(bc)
         domain_shape = tf.concat([tf.expand_dims(x_output_resolution,0),self.get_domain_shape(bc_shape)],0)
         domain_sizes = compute_domain_sizes(tf.concat([dx,dx],1), domain_shape)
-        max_domain_sizes = tf.reduce_max(domain_sizes,1)
+        max_domain_sizes = tf.reduce_max(domain_sizes,1,keepdims=True)
+        pos_embeddings_nd = self.generate_position_embeddings(bc_shape[0],domain_shape)
+        pos_embeddings_nminus1d = pos_embeddings_nd[...,0,:]
 
         #(ndims-1) dimensional convolutions on the BC info
-        bc_conv_result = self.boundary_convolution_ops[0](bc)
+        bc_conv_result = self.boundary_convolution_ops[0](tf.concat([bc,pos_embeddings_nminus1d], 1 if self.data_format == 'channels_first' else -1))
         for layer in self.boundary_convolution_ops[1:]:
             bc_conv_result = layer(bc_conv_result)
 
         #mlp layers
         bc_conv_spp_result = self.spp(bc_conv_result)
-        dense_inp = tf.concat([dx,domain_sizes,bc_conv_spp_result],1)
+        dense_inp = tf.concat([dx,domain_sizes/max_domain_sizes,bc_conv_spp_result],1)
         dense_result = self.domain_info_dense_layers[0](dense_inp)
         for layer in self.domain_info_dense_layers[1:]:
             dense_result = layer(dense_result)
@@ -139,6 +151,7 @@ class Dirichlet_BC_NN_Legacy_2(tf.keras.models.Model):
         out = tf.einsum(self._einsum_boundary_conv_input_str + ',mx,bm->' + self._einsum_output_str, bc_conv_result, sinh_values, dense_result)
 
         #apply 2d convs
+        out = tf.concat([out,pos_embeddings_nd], 1 if self.data_format == 'channels_first' else -1)
         for layer in self.final_convolution_ops:
             out = layer(out)
 	
@@ -184,18 +197,18 @@ if __name__ == '__main__':
     x_output_resolution = tf.constant(nx,dtype=tf.int32)
 
     bccfg = {
-        'filters': [4,8,16,32,40],
+        'filters': [4,8,16,32,20],
         'kernel_sizes': [19,17,15,13,11],
         'padding_mode': 'SYMMETRIC',
         'activation': tf.nn.leaky_relu,
         'use_bias': True
     }
     sppcfg = {
-        'levels': [[2,2],3,5,8],
+        'levels': [[2],3,5,8],
         'pooling_type': 'average'
     }
     mlpcfg = {
-        'units': [250,125,40],
+        'units': [250,125,20],
         'activations': [tf.nn.leaky_relu,tf.nn.leaky_relu,'softmax']
     }
     fccfg = {
