@@ -3,16 +3,11 @@ import tensorflow as tf
 #physical_devices = tf.config.list_physical_devices('GPU') 
 #tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
+from .utils import load_model_checkpoint, choose_optimizer
+from ..utils import convert_tf_object_names
 from ..models import Homogeneous_Poisson_NN_Legacy
 from ..losses import loss_wrapper
 from ..dataset.generators import numerical_dataset_generator
-
-def choose_optimizer(name):
-    name = name.lower()
-    if name == "adam":
-        return tf.keras.optimizers.Adam
-    elif name == "sgd":
-        return tf.keras.optimizers.SGD
 
 parser = argparse.ArgumentParser(description="Train the Homogeneous Poisson NN")
 parser.add_argument("config", type=str, help="Path to the configuration json for training, model and dataset parameters")
@@ -21,17 +16,11 @@ parser.add_argument("--continue_from_checkpoint", type=str, help="Continue from 
 
 args = parser.parse_args()
 
-config = json.load(open(args.config))
+config = convert_tf_object_names(json.load(open(args.config)))
 checkpoint_dir = args.checkpoint_dir
 
 if 'precision' in config['training'].keys():
     tf.keras.backend.set_floatx(config['training']['precision'])
-
-for key in config['model'].keys():
-    if 'config' in key:
-        for layer_config_key in config['model'][key].keys():
-            if 'activation' in layer_config_key and isinstance(config['model'][key][layer_config_key],str):
-                config['model'][key][layer_config_key] = eval(config['model'][key][layer_config_key])
                 
 model = Homogeneous_Poisson_NN_Legacy(**config['model'])
 optimizer = choose_optimizer(config['training']['optimizer'])(**config['training']['optimizer_parameters'])
@@ -47,23 +36,7 @@ cb = [
     tf.keras.callbacks.TerminateOnNaN()
 ]
 
-if args.continue_from_checkpoint is not None:
-    checkpoint_filename = tf.train.latest_checkpoint(args.continue_from_checkpoint)
-    print(checkpoint_filename)
-    try:
-        model.load_weights(checkpoint_filename)
-    except:#tf is stupid and is incapable of casting weights saved as eg float32 to float64. handle that problem.
-        checkpoint = tf.train.load_checkpoint(checkpoint_filename)
-        weight_name_list = tf.train.list_variables(checkpoint_filename)
-        checkpoint_dtype = checkpoint.get_tensor(weight_name_list[1][0]).dtype
-        tf.keras.backend.set_floatx(str(checkpoint_dtype))
-        dummy_model = type(model)(**config['model'])
-        _ = dummy_model([tf.cast(t, tf.keras.backend.floatx()) for t in inp])
-        dummy_model.load_weights(checkpoint_filename)
-        tf.keras.backend.set_floatx(config['training']['precision'])
-        model.set_weights(dummy_model.get_weights())
-        del dummy_model, checkpoint, weight_name_list, checkpoint_dtype
-
+load_model_checkpoint(model, args.continue_from_checkpoint, model_config = config['model'], sample_model_input = inp)
 
 model.summary()
 #model.run_eagerly = True

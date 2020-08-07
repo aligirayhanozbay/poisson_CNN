@@ -27,3 +27,10 @@ def load_model_checkpoint(model, checkpoint_path, model_config = None, sample_mo
             del dummy_model, checkpoint, weight_name_list, checkpoint_dtype
     else:
         pass
+
+def convert_tf_object_names(config):
+    for key in config:
+        if isinstance(config[key],str) and ("tf." in config[key]):
+            config[key] = eval(config[key])
+        elif isinstance(config[key],dict):
+            convert_tf_object_names(config[key])

@@ -3,11 +3,10 @@ import tensorflow as tf
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 from .utils import choose_optimizer, load_model_checkpoint
+from ..utils import convert_tf_object_names
 from ..models import Dirichlet_BC_NN_Legacy_2
 from ..losses import loss_wrapper
 from ..dataset.generators import numerical_dataset_generator
-
-
 
 parser = argparse.ArgumentParser(description="Train the Homogeneous Poisson NN")
 parser.add_argument("config", type=str, help="Path to the configuration json for training, model and dataset parameters")
@@ -16,17 +15,11 @@ parser.add_argument("--continue_from_checkpoint", type=str, help="Continue from 
 
 args = parser.parse_args()
 
-config = json.load(open(args.config))
+config = convert_tf_object_names(json.load(open(args.config)))
 checkpoint_dir = args.checkpoint_dir
 
 if 'precision' in config['training'].keys():
     tf.keras.backend.set_floatx(config['training']['precision'])
-
-for key in config['model'].keys():
-    if 'config' in key:
-        for layer_config_key in config['model'][key].keys():
-            if 'activation' in layer_config_key and isinstance(config['model'][key][layer_config_key],str):
-                config['model'][key][layer_config_key] = eval(config['model'][key][layer_config_key])
 
 model = Dirichlet_BC_NN_Legacy_2(**config['model'])
 optimizer = choose_optimizer(config['training']['optimizer'])(**config['training']['optimizer_parameters'])
@@ -37,7 +30,7 @@ inp,tar=dataset.__getitem__(0)
 out = model(inp + [tf.shape(tar)[2]])
 model.compile(loss=loss,optimizer=optimizer)
 cb = [
-    tf.keras.callbacks.ModelCheckpoint(checkpoint_dir + '/chkpt.checkpoint',save_weights_only=True,save_best_only=True,monitor = 'loss'),
+    tf.keras.callbacks.ModelCheckpoint(checkpoint_dir + '/chkpt.checkpoint',save_weights_only=True,save_best_only=True,monitor = 'mse'),
     tf.keras.callbacks.ReduceLROnPlateau(patience = 4,monitor='loss',min_lr=config['training']['min_learning_rate']),
     tf.keras.callbacks.TerminateOnNaN()
 ]
