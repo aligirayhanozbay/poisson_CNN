@@ -172,7 +172,7 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         pos_embeddings = tf.tile(pos_embeddings, [batch_size] + [1 for _ in range(self.ndims+1)])
         return pos_embeddings
 
-    #@tf.function
+    @tf.function
     def call(self, inp):
 
         rhses, dx = inp
@@ -185,10 +185,10 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         batch_size = inp_shape[0]
         domain_sizes = self.compute_domain_sizes(tf.concat([dx,dx],1), domain_shape)
         max_domain_sizes = tf.reduce_max(domain_sizes,1)
-        #pos_embeddings = self.generate_position_embeddings(batch_size, domain_shape)
+        pos_embeddings = self.generate_position_embeddings(batch_size, domain_shape)
 
         dense_inp = tf.concat([dx,domain_sizes],1)
-        conv_inp = rhses#tf.concat([rhses, pos_embeddings], 1 if self.data_format == 'channels_first' else -1)
+        conv_inp = tf.concat([rhses, pos_embeddings], 1 if self.data_format == 'channels_first' else -1)#rhses#
 
         initial_conv_result = self.pre_bottleneck_convolution_ops[0](conv_inp)
         for layer in self.pre_bottleneck_convolution_ops[1:]:
