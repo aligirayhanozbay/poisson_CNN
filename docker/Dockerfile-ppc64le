@@ -1,9 +1,10 @@
-FROM ibmcom/tensorflow-ppc64le:2.2.0-gpu-py3-jupyter
+FROM ibmcom/tensorflow-ppc64le:latest-gpu-py3-jupyter
 
 SHELL ["/bin/bash", "-c"]
 
-RUN apt update && apt install -y --no-install-recommends git cmake openmpi-bin libopenmpi-dev cuda-*-dev*10-1
-RUN pip3 install tensorflow_probability
+RUN apt update && apt install -y --no-install-recommends git cmake openmpi-bin libopenmpi-dev cuda-*-dev*10-1 openjdk-11-jdk
+RUN wget -O /usr/bin/bazel https://oplab9.parqtec.unicamp.br/pub/ppc64el/bazel/ubuntu_18.04/bazel_bin_ppc64le_3.4.1 && chmod +x /usr/bin/bazel
+RUN pip3 install tensorflow-probability
 
 RUN cd / && git clone https://github.com/aligirayhanozbay/poisson_CNN.git
 RUN cd /poisson_CNN && pip3 install -e . 
