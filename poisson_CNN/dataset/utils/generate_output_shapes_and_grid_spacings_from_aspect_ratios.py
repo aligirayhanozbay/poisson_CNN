@@ -6,7 +6,7 @@ def generate_output_shapes_and_grid_spacings_from_aspect_ratios(aspect_ratios, r
     Generates output shapes and grid spacings given aspect ratio(s).
 
     Inputs:
-    -aspect_ratios: int tf.Tensor of shape [batch_size,ndims] of constant_dx is False or [1,ndims] if constant_dx is True. The aspect ratios to use.
+    -aspect_ratios: int tf.Tensor of shape [batch_size,ndims] if constant_dx is False or [1,ndims] if constant_dx is True. The aspect ratios to use.
     -random_output_shape_range: int tf.Tensor of shape [ndims,2]. first spatial dimension will be chosen according to the values in this tensor. output shapes will never exceed the values across the max values (slice [:,1]) of this input, but they may be below the min values (slice [:,0]) if constant_dx is True
     -random_dx_range: float tf.Tensor of shape [ndims,2]. x dir grid spacing will be chosen according to the values in this tensor. random_dx_range across other dims may not be respected if constant_dx is False.
     -constant_dx: bool. If set to true, grid spacings will be identical in each dimension.
@@ -19,7 +19,6 @@ def generate_output_shapes_and_grid_spacings_from_aspect_ratios(aspect_ratios, r
     nx_max = tf.cast(random_output_shape_range[0][1],tf.keras.backend.floatx())+0.4999999999
     nx = tf.cast(tf.math.round(tf.random.uniform((1,))*(nx_max-nx_min)+tf.cast(random_output_shape_range[0][0],tf.keras.backend.floatx())),tf.int32)[0]
     
-
     if constant_dx:#aspect ratio cant vary with constant dx and constant domain shape.
         dx = tf.tile(tf.random.uniform((samples,1))*(random_dx_range[0][1] - random_dx_range[0][0]) + random_dx_range[0][0],[1,ndims])
         npts_other_dimensions = tf.cast(tf.cast(nx,aspect_ratios.dtype)/aspect_ratios[0],tf.int32)

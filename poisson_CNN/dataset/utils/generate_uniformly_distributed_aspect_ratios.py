@@ -68,6 +68,7 @@ def generate_uniformly_distributed_aspect_ratios(output_shape_range, dx_range = 
     Outputs:
     Float tensor of shape [samples, ndims-1]
     '''
+    output_shape_range = tf.convert_to_tensor(output_shape_range)
     if dx_range is None:
         domain_size_range = tf.cast(output_shape_range,tf.float32)-1.0
     else:

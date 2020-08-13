@@ -3,7 +3,7 @@ import string
 import math
 
 @tf.function(experimental_relax_shapes=True)
-def generate_smooth_function(grid_size,coefficients_or_coefficients_size, homogeneous_bc = False, return_coefficients = False, normalize = False, coefficients_return_shape = None):
+def generate_smooth_function(ndims,grid_size,coefficients_or_coefficients_size, homogeneous_bc = False, return_coefficients = False, normalize = False, coefficients_return_shape = None):
     '''
     Generates a smooth function sampled on a grid the size of which is given by grid_size.
 
@@ -20,7 +20,7 @@ def generate_smooth_function(grid_size,coefficients_or_coefficients_size, homoge
     -coefficients: tf.Tensor of shape (2,) + coefficients_size if homogeneous_bc is False, or tf.Tensor of shape coefficients_size if homogeneous_bc is True. Fourier coeffs used to generate result.
     '''
     
-    ndims = len(grid_size)
+    #ndims = len(ndims)#tf.shape(tf.shape(grid_size))[0]
     
     if isinstance(coefficients_or_coefficients_size,tf.Tensor) and coefficients_or_coefficients_size.dtype == tf.keras.backend.floatx():
         if homogeneous_bc:
@@ -67,6 +67,11 @@ def generate_smooth_function(grid_size,coefficients_or_coefficients_size, homoge
                 return res, sin_coefficients
             else:
                 cos_coefficients = tf.pad(cos_coefficients,paddings,"CONSTANT",constant_values = 0.0)
+                return res, tf.stack([sin_coefficients,cos_coefficients],0)
+        else:
+            if homogeneous_bc:
+                return res, sin_coefficients
+            else:
                 return res, tf.stack([sin_coefficients,cos_coefficients],0)
     else:
         return res

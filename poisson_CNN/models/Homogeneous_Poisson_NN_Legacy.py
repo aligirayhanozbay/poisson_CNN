@@ -172,7 +172,7 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         pos_embeddings = tf.tile(pos_embeddings, [batch_size] + [1 for _ in range(self.ndims+1)])
         return pos_embeddings
 
-    @tf.function
+    #@tf.function
     def call(self, inp):
 
         rhses, dx = inp

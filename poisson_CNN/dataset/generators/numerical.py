@@ -71,7 +71,7 @@ def generate_random_boundaries(n_outputpts, batch_size = 1, max_magnitude = {'le
                 boundaries[boundary] = tf.expand_dims(boundaries[boundary], axis = 2)
     return boundaries
 
-def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]], random_dx_range = [0.005,0.05], normalize_by_domain_size = False, aspect_ratio_range = None, aspect_ratio_flip_probability = 0.5):
+def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', boundaries = 'random', rhses = 'random', rhs_smoothness = None, boundary_smoothness = None, rhs_max_magnitude = 1.0, boundary_max_magnitude = {'left':1.0, 'top':1.0, 'right':1.0, 'bottom': 1.0}, nonzero_boundaries = ['left', 'right', 'bottom', 'top'], solver_method = 'multigrid', return_rhs = True, return_boundaries = False, return_dx = False, return_shape = False, random_output_shape_range = [[64,85],[64,85]], random_dx_range = [0.005,0.05], normalize_by_domain_size = False):
     '''
     Generates Poisson equation RHS-solution pairs with 'random' RHS functions.
 
@@ -95,8 +95,7 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     '''
     
     if output_shape == 'random' and aspect_ratio_range is not None:
-        aspect_ratio_range = tf.convert_to_tensor(aspect_ratio_range)
-        aspect_ratios = generate_uniformly_distributed_random_aspect_ratios(ndims = 2, min_ar = aspect_ratio_range[:,0], max_ar = aspect_ratio_range[:,1], samples = 1, flip_probability = aspect_ratio_flip_probability)
+        aspect_ratios = generate_uniformly_distributed_aspect_ratios(random_output_shape_range, dx_range = None, samples = 1)
         output_shape, dx_generated = generate_output_shapes_and_grid_spacings_from_aspect_ratios(aspect_ratios, random_output_shape_range, [random_dx_range], constant_dx = True, samples = batch_size)
         output_shape = np.array(output_shape).tolist()
         dx = dx_generated[:,:1] if dx == 'random' else dx
