@@ -37,43 +37,36 @@ def process_normalizations(normalizations):
 
 @tf.function
 def generate_polynomial_and_second_derivative(roots,degree,npts,domain_size):
+    '''
+    Generates a 1d polynomial in the domain [0,domain_size] of degree (degree) sampled on npts equispaced points.
+
+    Inputs:
+    -roots: float tensor of shape (n_roots,). Values should be between 0 and -1 such that the form of the resulting polynomial is (x+roots[0])*(x+roots[1])*... n_roots should be greater than or equal to degree.
+    -degree: int. Degree of the polynomial. Should be less than or equal to n_roots.
+    -npts: int. No of sampling points.
+    -domain_size: float, larger than 0. Total size of the domain.
+    '''
+
+    #Build grid
     dx = 1/(tf.cast(npts,domain_size.dtype)-1)
     coords = tf.linspace(tf.constant(0.0,dtype=tf.keras.backend.floatx())-dx,1.0+dx,npts+2)#extra 2 points needed for numerical stability
     
-    #'''
+    #Evaluate polynomial and differentiate
     coords_expanded = tf.expand_dims(coords,1)
     roots = tf.expand_dims(roots[:degree],0)
     factors = coords_expanded + roots
     
     p = tf.reduce_prod(factors,1)
-    dp = tf.gradients(p,coords)[0]
-    ddp = tf.gradients(dp,coords)[0]
+    dp = tf.gradients(p,coords)[0]/domain_size
+    ddp = tf.gradients(dp,coords)[0]/domain_size
     
-    '''
-    import pdb
-    pdb.set_trace()
-    with tf.GradientTape() as tape1:
-        tape1.watch(coords)
-        with tf.GradientTape() as tape2:
-            tape2.watch(coords)
-            coords_expanded = tf.expand_dims(coords,1)
-            roots = tf.expand_dims(roots[:degree],0)
-            factors = coords_expanded + roots
-            p = tf.reduce_prod(factors,1)
-        dp = tape2.gradient(p,coords)
-    ddp = tape1.gradient(dp,coords)
-    '''
-    
-
+    #Autodiff occasionally generates nan values. Replace these with interpolated values.
     nan_values = tf.math.is_nan(ddp)
-
     if tf.reduce_any(nan_values):
         interpolated_ddp = 0.5*(ddp[:-2] + ddp[2:])
         nan_value_indices = tf.where(nan_values)
         interpolated_values_to_replace_nans = tf.gather_nd(interpolated_ddp, nan_value_indices-1)
         ddp = tf.tensor_scatter_nd_update(ddp, nan_value_indices, interpolated_values_to_replace_nans)
-
-    #ddp = tf.debugging.check_numerics(ddp, 'nan or inf in ddp')
     
     return p[1:-1],ddp[1:-1]
 
@@ -144,9 +137,6 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         self.taylor_degree_range = handle_grid_parameters_range(taylor_degree_range, ndims, tf.int32)
         self.taylor_einsum_str = 'B' + ',B'.join(list(string.ascii_lowercase[-self.ndims:])) + '->B' + string.ascii_lowercase[-self.ndims:]
-
-        #set correct conv method to use when building rhs from solution
-        self.conv_method = choose_conv_method(ndims)
 
         self.return_rhses = return_rhses
 
@@ -244,8 +234,6 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         second_derivatives = []
 
         polynomial_degrees = self.generate_grid_sizes(self.taylor_degree_range)
-
-        #domain_sizes = tf.einsum('ij,j->ij',grid_spacings,tf.cast(grid_size,tf.keras.backend.floatx()))
         
         for k in range(self.ndims):
             coeffs = 2*tf.random.uniform([self.batch_size, polynomial_degrees[k]-1],dtype = tf.keras.backend.floatx())-1
@@ -325,20 +313,20 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         rhses_fourier, domain_sizes = self.generate_rhses_fourier(soln_coeffs_fourier, tf.shape(solns_fourier)[2:], grid_spacings_fourier)
         
         #taylor series component
-        #rhses_taylor, solns_taylor = self.generate_soln_and_rhs_taylor(tf.shape(solns_fourier)[2:], domain_sizes)
-        #rhses_taylor, solns_taylor = self.set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(rhses_fourier, rhses_taylor, solns_taylor)
+        rhses_taylor, solns_taylor = self.generate_soln_and_rhs_taylor(tf.shape(solns_fourier)[2:], domain_sizes)
+        rhses_taylor, solns_taylor = self.set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(rhses_fourier, rhses_taylor, solns_taylor)
         
         #sum components
-        solns = solns_fourier# + solns_taylor
-        rhses = rhses_fourier# + rhses_taylor
+        solns = solns_fourier + solns_taylor
+        rhses = rhses_fourier + rhses_taylor
         grid_spacings = grid_spacings_fourier
-
+        
         #apply normalization
         rhses, solns = self.apply_normalization(rhses, solns, domain_sizes)
-
+        
         #pack
         out = self.pack_outputs(rhses, solns, grid_spacings)
-        #out = self.pack_outputs(rhses, rhses, grid_spacings)
+        
         return out
 
 if __name__=='__main__':
@@ -354,21 +342,13 @@ if __name__=='__main__':
     ctrl_pt_range = [[cmin,cmax] for _ in range(ndims)]
     hbc = True
     normalizations = {'rhs_max_magnitude':True}
-    rpdg = reverse_poisson_dataset_generator(batch_size = 5, batches_per_epoch = 5, random_output_shape_range = grid_size_range, fourier_coeff_grid_size_range = ctrl_pt_range, taylor_degree_range = ctrl_pt_range, grid_spacings_range = dxrange, ndims = 2, homogeneous_bc = True, return_rhses = True, return_boundaries = False, return_dx = True, normalizations = normalizations, uniform_grid_spacing = True)
+    uniform_grid_spacing = True
+    rpdg = reverse_poisson_dataset_generator(batch_size = 5, batches_per_epoch = 5, random_output_shape_range = grid_size_range, fourier_coeff_grid_size_range = ctrl_pt_range, taylor_degree_range = ctrl_pt_range, grid_spacings_range = dxrange, ndims = 2, homogeneous_bc = True, return_rhses = True, return_boundaries = False, return_dx = True, normalizations = normalizations, uniform_grid_spacing = uniform_grid_spacing)
     inp, out = rpdg.__getitem__()
 
-    '''
-    stencil_size = 5
-    stencil = tf.constant(build_fd_coefficients(stencil_size, 2, ndims), dtype=tf.keras.backend.floatx())
-    rhs = inp[0]
-    soln = out
-    kernel = tf.einsum('i...,bi->b...',stencil,1/(inp[-1]**2))
-    kernel = tf.reshape(kernel,tf.unstack(tf.shape(kernel)) + [1,1])
-    rhs_computed = tf.map_fn(lambda x:tf.keras.backend.conv2d(tf.expand_dims(x[0],0),x[1],data_format='channels_first'), (soln,kernel), dtype=soln.dtype)[:,0,...]
-    sl = [Ellipsis] + [slice(k//2,-(k//2)) for k in tf.shape(kernel)[1:3]]
-    rhs_analytical = rhs[sl]
-    print('MAPE between analytical (generated) RHS and finite difference RHS: ' + str(tf.reduce_mean((tf.abs(rhs_computed-rhs_analytical)/tf.abs(rhs_analytical))).numpy()))
-    '''
+
+    if uniform_grid_spacing:
+        inp[1] = tf.concat([inp[1] for _ in range(ndims)],1)
     from ...losses import linear_operator_loss
     loss_fn = linear_operator_loss(stencil_sizes = 5, orders = 2, ndims = 2, data_format = 'channels_first')
     loss_val = loss_fn(inp[0],out,inp[1])
