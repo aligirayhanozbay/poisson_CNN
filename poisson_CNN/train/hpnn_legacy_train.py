@@ -16,6 +16,7 @@ parser.add_argument("config", type=str, help="Path to the configuration json for
 parser.add_argument("--checkpoint_dir", type=str, help="Directory to save result checkpoints in", default=".")
 parser.add_argument("--continue_from_checkpoint", type=str, help="Continue from this checkpoint file if provided", default=None)
 parser.add_argument("--dataset_type", type=lambda x: str(x).lower(), help="Method of dataset generation. Options are 'numerical' or 'analytical'.", default="analytical")
+parser.add_argument("--learning_rate", type=str, help="Overrides the learning rate with the provided value, or with the value from the json file if 'from_json' is the provided value", default = None)
 
 args = parser.parse_args()
 recognized_dataset_types = ['numerical', 'analytical']
@@ -50,6 +51,9 @@ with dist_strategy.scope():
 
     load_model_checkpoint(model, args.continue_from_checkpoint, model_config = config['model'], sample_model_input = inp)
 
+    if args.learning_rate is not None:
+        model.optimizer.learning_rate = config['training']['optimizer_parameters']['learning_rate'] if args.learning_rate.lower() == 'from_json' else float(args.learning_rate)
+    
     model.summary()
     #model.run_eagerly = True
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
