@@ -94,23 +94,23 @@ def numerical_dataset(batch_size = 1, output_shape = 'random', dx = 'random', bo
     Outputs a tf.Tensor of shape (batch_size * smoothness_levels, n[0], n[1])
     '''
     
-    if output_shape == 'random' and uniformly_distributed_aspect_ratios:
+    if (isinstance(output_shape, str) and output_shape == 'random') and uniformly_distributed_aspect_ratios:
         aspect_ratios = generate_uniformly_distributed_aspect_ratios(random_output_shape_range, dx_range = None, samples = 1)
         output_shape, dx_generated = generate_output_shapes_and_grid_spacings_from_aspect_ratios(aspect_ratios, random_output_shape_range, [random_dx_range], constant_dx = True, samples = batch_size)
         output_shape = np.array(output_shape).tolist()
         dx = dx_generated[:,:1] if dx == 'random' else dx
     else:
-        if output_shape == 'random':
+        if isinstance(output_shape, str) and output_shape == 'random':
             output_shape = [np.random.randint(random_output_shape_range[k][0], high = random_output_shape_range[k][1]) for k in range(len(random_output_shape_range))]
 
-        if dx == 'random':
+        if isinstance(dx, str) and dx == 'random':
             dx = tf.random.uniform((batch_size,1))*(random_dx_range[1] - random_dx_range[0]) + random_dx_range[0]
         elif isinstance(dx, float):
             dx = np.ones((batch_size,1))*dx
             
-    if rhses == 'random':
+    if isinstance(rhses,str) and rhses == 'random':
         rhses = generate_random_RHS(batch_size, output_shape, smoothness = rhs_smoothness, max_magnitude = rhs_max_magnitude)
-    elif rhses == 'zero':
+    elif isinstance(rhses,str) and rhses == 'zero':
         rhses = np.zeros([batch_size,1] + list(output_shape))
     
     if boundaries == 'random':
