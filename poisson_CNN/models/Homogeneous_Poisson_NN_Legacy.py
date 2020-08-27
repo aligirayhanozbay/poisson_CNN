@@ -8,7 +8,7 @@ from ..utils import choose_conv_layer, check_batchnorm_fused_enable, apply_advan
 from ..dataset.utils import compute_domain_sizes, split_indices
 
 class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
-    def __init__(self, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_deconv_config = None, bottleneck_multilinear_config = None, input_normalization = None, output_scaling = None, use_batchnorm = False, postsmoother_iterations = 5, use_scaling = False, scaling_config = None, gradient_accumulation_steps = None):
+    def __init__(self, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_deconv_config = None, bottleneck_multilinear_config = None, input_normalization = None, output_scaling = None, use_batchnorm = False, postsmoother_iterations = 5, use_scaling = False, use_positional_embeddings = True, scaling_config = None, gradient_accumulation_steps = None):
 
         super().__init__()
         ndims = 2
@@ -25,6 +25,7 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
             self.fd_conv_method = choose_conv_method(ndims)
         
         self.use_batchnorm = use_batchnorm
+        self.use_positional_embeddings = use_positional_embeddings
         self.data_format = data_format
 
         if pre_bottleneck_convolutions_config is None:
@@ -185,10 +186,15 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         batch_size = inp_shape[0]
         domain_sizes = self.compute_domain_sizes(tf.concat([dx,dx],1), domain_shape)
         max_domain_sizes = tf.reduce_max(domain_sizes,1)
-        pos_embeddings = self.generate_position_embeddings(batch_size, domain_shape)
 
+        if self.use_positional_embeddings:
+            pos_embeddings = self.generate_position_embeddings(batch_size, domain_shape)
+            conv_inp = tf.concat([rhses, pos_embeddings], 1 if self.data_format == 'channels_first' else -1)#rhses#
+        else:
+            conv_inp = rhses
+            
         dense_inp = tf.concat([dx,domain_sizes],1)
-        conv_inp = tf.concat([rhses, pos_embeddings], 1 if self.data_format == 'channels_first' else -1)#rhses#
+        
 
         initial_conv_result = self.pre_bottleneck_convolution_ops[0](conv_inp)
         for layer in self.pre_bottleneck_convolution_ops[1:]:
