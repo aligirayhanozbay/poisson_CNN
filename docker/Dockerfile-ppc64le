@@ -47,4 +47,5 @@ RUN mkdir /fenics/dolfin/build && cd /fenics/dolfin/build && cmake .. && make -j
 RUN mkdir /fenics/mshr/build   && cd /fenics/mshr/build   && cmake .. && make -j 160 install
 RUN cd /fenics/dolfin/python && pip3 install .
 RUN cd /fenics/mshr/python   && pip3 install .
+ENV DIJITSO_CACHE_DIR=/tmp/dijitso_cache
 
