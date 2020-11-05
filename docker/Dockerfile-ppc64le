@@ -2,15 +2,49 @@ FROM ibmcom/tensorflow-ppc64le:latest-gpu-py3-jupyter
 
 SHELL ["/bin/bash", "-c"]
 
+#cuda version, tf-probability for interpolation
 RUN apt update && apt install -y --no-install-recommends git cmake openmpi-bin libopenmpi-dev cuda-*-dev*10-1 openjdk-11-jdk
 RUN wget -O /usr/bin/bazel https://oplab9.parqtec.unicamp.br/pub/ppc64el/bazel/ubuntu_18.04/bazel_bin_ppc64le_3.4.1 && chmod +x /usr/bin/bazel
 RUN pip3 install tensorflow-probability
 
+#poisson_CNN package
 RUN cd / && git clone https://github.com/aligirayhanozbay/poisson_CNN.git
 RUN cd /poisson_CNN && pip3 install -e . 
 
+#amgx for GPU accelerated multigrid
 RUN cd / && git clone https://github.com/NVIDIA/AMGX
 RUN mkdir /AMGX/build
 RUN cd /AMGX/build && cmake ../ && make -j160 all
 RUN cd / && git clone https://github.com/shwina/pyamgx && cd pyamgx && export AMGX_DIR=/AMGX/ && pip3 install cython && pip3 install .
 ENV AMGX_DIR=/AMGX/
+
+#fenics - install dependencies and build from source
+RUN apt update && apt install -y libboost-all-dev
+RUN sed 's/bionic/focal/g' -i /etc/apt/sources.list
+
+RUN apt-mark hold python3
+RUN apt update && apt install -y --no-install-recommends petsc-dev libopenmpi-dev libscotch-dev libparmetis-dev libeigen3-dev libopenblas-dev liblapack-dev libhdf5-dev trilinos-all-dev libgmp-dev libmpfr-dev pybind11-dev slepc-dev libsundials-dev libtool autoconf build-essential pkg-config automake tcsh
+RUN cd / && mkdir fenics
+ENV PETSC_DIR=/usr/lib/petsc/
+ENV SLEPC_DIR=/usr/lib/slepc/
+ENV PETSC_ARCH=linux-gnu-cxx-opt
+RUN pip3 install mpi4py matplotlib
+RUN pip3 install petsc4py==3.12
+RUN pip3 install slepc4py==3.12
+
+
+RUN cd /fenics && git clone https://github.com/FEniCS/fiat.git \
+	&& git clone https://bitbucket.org/fenics-project/dijitso \
+	&& git clone https://github.com/FEniCS/ufl.git \
+	&& git clone https://bitbucket.org/fenics-project/ffc \
+	&& git clone https://bitbucket.org/fenics-project/dolfin \
+	&& git clone https://bitbucket.org/fenics-project/mshr
+RUN cd /fenics/fiat && pip3 install . && cd ..
+RUN cd /fenics/dijitso && pip3 install . && cd ..
+RUN cd /fenics/ufl && pip3 install . && cd ..
+RUN cd /fenics/ffc && pip3 install . && cd ..
+RUN mkdir /fenics/dolfin/build && cd /fenics/dolfin/build && cmake .. && make -j 160 install
+RUN mkdir /fenics/mshr/build   && cd /fenics/mshr/build   && cmake .. && make -j 160 install
+RUN cd /fenics/dolfin/python && pip3 install .
+RUN cd /fenics/mshr/python   && pip3 install .
+
