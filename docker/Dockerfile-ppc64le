@@ -23,7 +23,7 @@ RUN apt update && apt install -y libboost-all-dev
 RUN sed 's/bionic/focal/g' -i /etc/apt/sources.list
 
 RUN apt-mark hold python3
-RUN apt update && apt install -y --no-install-recommends petsc-dev libopenmpi-dev libscotch-dev libparmetis-dev libeigen3-dev libopenblas-dev liblapack-dev libhdf5-dev trilinos-all-dev libgmp-dev libmpfr-dev pybind11-dev slepc-dev libsundials-dev libtool autoconf build-essential pkg-config automake tcsh
+RUN apt update && apt install -y --no-install-recommends petsc-dev libopenmpi-dev libscotch-dev libparmetis-dev libeigen3-dev libopenblas-dev liblapack-dev libhdf5-dev trilinos-all-dev libgmp-dev libmpfr-dev pybind11-dev slepc-dev libsundials-dev libtool autoconf build-essential pkg-config automake tcsh g++
 RUN cd / && mkdir fenics
 ENV PETSC_DIR=/usr/lib/petsc/
 ENV SLEPC_DIR=/usr/lib/slepc/
