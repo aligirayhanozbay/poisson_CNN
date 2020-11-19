@@ -1,3 +1,4 @@
 from .numerical import numerical_dataset, numerical_dataset_generator, generate_random_RHS, generate_random_boundaries, set_max_magnitude_in_batch
 from .analytical import homogeneous_analytical_dataset, homogeneous_analytical_dataset_generator
 from .reverse import reverse_poisson_dataset_generator
+from .reverse_neumann import reverse_poisson_dataset_generator_homogeneous_neumann

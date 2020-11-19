@@ -8,7 +8,7 @@ from ..utils import choose_conv_layer, check_batchnorm_fused_enable, apply_advan
 from ..dataset.utils import compute_domain_sizes, split_indices
 
 class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
-    def __init__(self, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_deconv_config = None, bottleneck_multilinear_config = None, input_normalization = None, output_scaling = None, use_batchnorm = False, postsmoother_iterations = 5, use_scaling = False, use_positional_embeddings = True, scaling_config = None, gradient_accumulation_steps = None):
+    def __init__(self, data_format = 'channels_first', final_convolutions_config = None, pre_bottleneck_convolutions_config = None, bottleneck_deconv_config = None, bottleneck_multilinear_config = None, input_normalization = None, output_scaling = None, use_batchnorm = False, postsmoother_iterations = 5, use_scaling = False, use_positional_embeddings = True, scaling_config = None, gradient_accumulation_steps = None, bc_type = 'dirichlet'):
 
         super().__init__()
         ndims = 2
@@ -103,6 +103,12 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
 
         self.postsmoother = JacobiIterationLayer([3,3],[2,2],self.ndims, data_format = self.data_format, n_iterations = postsmoother_iterations) if postsmoother_iterations > 0 else None
 
+        if bc_type.lower() == 'dirichlet':
+            self.padding_mode = "CONSTANT"
+        elif bc_type.lower() == 'neumann':
+            self.padding_mode = "SYMMETRIC"
+        else:
+            raise(ValueError('bc_type can only be neumann or dirichlet.'))
         self.bc_slice = [Ellipsis] + [slice(1,-1) for _ in range(self.ndims)] + [slice(0,None)] if self.data_format == 'channels_last' else [Ellipsis,slice(0,None)] + [slice(1,-1) for _ in range(self.ndims)]
         self.bc_paddings = [[0,0],[0,0]] + [[1,1] for _ in range(self.ndims)] if self.data_format == 'channels_first' else [[0,0]] + [[1,1] for _ in range(self.ndims)] + [[0,0]]
 
@@ -242,7 +248,7 @@ class Homogeneous_Poisson_NN_Legacy(tf.keras.models.Model):
         if self.scaling is not None:
             out = self.scaling([out, rhses])
 
-        out = tf.pad(out[self.bc_slice], self.bc_paddings, mode='CONSTANT',constant_values = 0.0)
+        out = tf.pad(out[self.bc_slice], self.bc_paddings, mode=self.padding_mode, constant_values = 0.0)
 
         if self.postsmoother is not None:
             out = self.postsmoother([out,rhses,dx])

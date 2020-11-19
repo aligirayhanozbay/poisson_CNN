@@ -3,14 +3,15 @@ import string
 import math
 
 @tf.function(experimental_relax_shapes=True)
-def generate_smooth_function(ndims,grid_size,coefficients_or_coefficients_size, homogeneous_bc = False, return_coefficients = False, normalize = False, coefficients_return_shape = None):
+def generate_smooth_function(ndims,grid_size,coefficients_or_coefficients_size, homogeneous_bc = False, homogeneous_neumann_bc = False, return_coefficients = False, normalize = False, coefficients_return_shape = None):
     '''
     Generates a smooth function sampled on a grid the size of which is given by grid_size.
 
     Inputs:
     -grid_size: list of ints. determines the shape of the output
     -coefficients_or_coefficients_size: float tf.Tensor or list of ints. determines the number of Fourier coefficients to use per spatial dim if a list of ints, or the coefficients themselves if a float tf.Tensor. larger values result in less smooth functions
-    -homogeneous_bc: bool. If set to true, the value of the result on the boundaries will be 0.0
+    -homogeneous_bc: bool. If set to true, the value of the result on the boundaries will be 0.0 - i.e. only sine components will be used. TODO: rename to homogeneous_dirichlet_bc
+    -homogeneous_neumann_bc: bool. If set to true, the derivative normal to the boundary will be 0.0 - i.e. only cosine components will be used. TODO: make the implementation cleaner
     -return_coefficients: bool. If set to true, the coefficients used to generate the function will be returned.
     -normalize: bool. If set to true, set max magnitude of the result to 1
     -coefficients_return_shape: tf.Tensor. If provided, and return_coefficients is set to True, the returned coefficients will be padded with 0s to this shape, as though additional Fourier modes with 0 amplitudes exist. Useful for shape compatibility of returned coefficients when working with a batch of results returned by this function. 
@@ -25,11 +26,17 @@ def generate_smooth_function(ndims,grid_size,coefficients_or_coefficients_size, 
     if isinstance(coefficients_or_coefficients_size,tf.Tensor) and coefficients_or_coefficients_size.dtype == tf.keras.backend.floatx():
         if homogeneous_bc:
             sin_coefficients = coefficients_or_coefficients_size
+        elif homogeneous_neumann_bc:
+            sin_coefficients = tf.zeros(tf.shape(coefficients_or_coefficients_size), coefficients_or_coefficients_size.dtype)
+            cos_coefficients = coefficients_or_coefficients_size
         else:
             sin_coefficients = coefficients_or_coefficients_size[0]
             cos_coefficients = coefficients_or_coefficients_size[1]
     else:
-        sin_coefficients = 2*tf.random.uniform(coefficients_or_coefficients_size,dtype=tf.keras.backend.floatx())-1
+        if homogeneous_neumann_bc:
+            sin_coefficients = 2*tf.zeros(coefficients_or_coefficients_size,dtype=tf.keras.backend.floatx())
+        else:
+            sin_coefficients = 2*tf.random.uniform(coefficients_or_coefficients_size,dtype=tf.keras.backend.floatx())-1
         if not homogeneous_bc:
             cos_coefficients = 2*tf.random.uniform(coefficients_or_coefficients_size,dtype=tf.keras.backend.floatx())-1
 

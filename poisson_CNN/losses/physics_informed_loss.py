@@ -44,7 +44,7 @@ class linear_operator_loss:
             squared_error_normalized = tf.einsum('i...,i->i...', squared_error, 1/max_rhs_magnitudes**2)
             return tf.reduce_mean(squared_error_normalized)
         else:
-            return self.mse(rhs[self.get_rhs_indices(tf.shape(rhs))],rhs_computed)
+            return tf.reduce_mean(self.mse(rhs[self.get_rhs_indices(tf.shape(rhs))],rhs_computed))
         
 if __name__ == '__main__':
     tf.keras.backend.set_floatx('float64')
