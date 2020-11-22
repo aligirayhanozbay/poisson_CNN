@@ -1,10 +1,10 @@
 import tensorflow as tf
 
 from ..dataset.generators.reverse import choose_conv_method
-from ..dataset.utils import build_fd_coefficients
+from ..dataset.utils import build_fd_coefficients, compute_domain_sizes
 
 class linear_operator_loss:
-    def __init__(self, stencil_sizes, orders, ndims = None, data_format = 'channels_first', normalize = False):
+    def __init__(self, stencil_sizes, orders, ndims = None, data_format = 'channels_first', normalize = False, inputs_have_max_domain_size_squared_normalization = False):
         if ndims is None:
             try:
                 self.ndims = len(stencil_sizes)
@@ -19,10 +19,8 @@ class linear_operator_loss:
         self.conv_method = choose_conv_method(self.ndims)
         self.data_format = data_format
         self.normalize = normalize
-        if self.normalize:
-            self.mse = lambda y_true,y_pred: (y_true-y_pred)**2
-        else:
-            self.mse = tf.keras.losses.MeanSquaredError()
+        self.inputs_have_max_domain_size_squared_normalization = inputs_have_max_domain_size_squared_normalization
+        self.mse = lambda y_true,y_pred: (y_true-y_pred)**2
 
     def get_rhs_indices(self, rhs_shape):
         lower = tf.convert_to_tensor(self.stencil.shape[1:])//2
@@ -35,7 +33,12 @@ class linear_operator_loss:
 
     @tf.function
     def __call__(self,rhs,solution,grid_spacings):
-        kernels = tf.einsum('i...,bi->b...',self.stencil,1/(grid_spacings**2))
+        if self.inputs_have_max_domain_size_squared_normalization:
+            q = (tf.expand_dims(tf.reduce_max(compute_domain_sizes(grid_spacings, tf.shape(solution)[2:] if self.data_format == 'channels_first' else tf.shape(solution)[1:-1]),1),-1)/grid_spacings)**2
+        else:
+            q = 1/(grid_spacings**2)
+        
+        kernels = tf.einsum('i...,bi->b...',self.stencil,q)
         kernels = tf.reshape(kernels,tf.unstack(tf.shape(kernels)) + [1,1])
         rhs_computed = tf.map_fn(lambda x: self.conv_method(tf.expand_dims(x[0],0),x[1],data_format=self.data_format), (solution,kernels), dtype=tf.keras.backend.floatx())[:,0,...]
         if self.normalize:
