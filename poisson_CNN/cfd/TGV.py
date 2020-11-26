@@ -1,9 +1,34 @@
+import argparse
 from __future__ import print_function
 from fenics import *
 from mshr import *
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.interpolate import RectBivariateSpline
 
+class GridInterpolantExpression(UserExpression):
+    def __init__(self, grid_values, domain_extent,**spline_options):
+        x = np.linspace(*domain_extent[0],grid_values.shape[-2])
+        y = np.linspace(*domain_extent[1],grid_values.shape[-1])
+        z = np.reshape(grid_values, [grid_values.shape[-2], grid_values.shape[-1]])
+        bbox = [x[0],x[-1],y[0],y[-1]]
+        self._spline = RectBivariateSpline(x,y,z,bbox=bbox,**spline_options)
+
+        super().__init__()
+
+    def value_shape(self):
+        return tuple()
+
+    def eval(self, value, x):
+        value[0] = self._spline(*x)
+    
+
+# parser = argparse.ArgumentParser(description = 'Run a Taylor-Green Vortex simulation using the projection method, with initial guesses to the pressure step linear solver provided by the Homogeneous Poisson NN model')
+# parser.add_argument('--model_config', type=str, help='Experiment JSON file containing the config of the HPNN model. If not provided, the program will be run without the NN.', default = None)
+# parser.add_argument('--model_checkpoint', type=str, help='Path to the Tensorflow checkpoint file containing model weights', defult = None)
+# parser.add_argument('--output_folder', type=str, help='Folder for the output data')
+# args = parser.parse_args()
+        
 comm = MPI.comm_world
 
 T = 1.0            # final time
@@ -131,7 +156,7 @@ for n in range(num_steps):
     b2 = assemble(L2)
     #[bc.apply(b2) for bc in bcp]
     solve(A2, p_.vector(), b2, 'bicgstab', 'hypre_amg')
-
+    
     # Step 3: Velocity correction step
     b3 = assemble(L3)
     solve(A3, u_.vector(), b3, 'cg', 'sor')
