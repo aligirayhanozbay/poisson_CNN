@@ -1,10 +1,13 @@
-import argparse
 from __future__ import print_function
+import argparse
 from fenics import *
 from mshr import *
 import numpy as np
 import matplotlib.pyplot as plt
+import tensorflow as tf
 from scipy.interpolate import RectBivariateSpline
+
+parameters['reorder_dofs_serial']=False
 
 class GridInterpolantExpression(UserExpression):
     def __init__(self, grid_values, domain_extent,**spline_options):
@@ -21,13 +24,25 @@ class GridInterpolantExpression(UserExpression):
 
     def eval(self, value, x):
         value[0] = self._spline(*x)
-    
+
+def get_mesh_coordinate_indices(mesh, npts):
+    coords = mesh.coordinates().transpose((1,0))
+    indices = []
+    for dim_npts, dim_coords in zip(npts, coords):
+        indices.append(
+            np.round(dim_coords/max(dim_coords) * (dim_npts-1)).astype(np.int32)
+        )
+    return np.stack(indices,-1)
 
 # parser = argparse.ArgumentParser(description = 'Run a Taylor-Green Vortex simulation using the projection method, with initial guesses to the pressure step linear solver provided by the Homogeneous Poisson NN model')
 # parser.add_argument('--model_config', type=str, help='Experiment JSON file containing the config of the HPNN model. If not provided, the program will be run without the NN.', default = None)
 # parser.add_argument('--model_checkpoint', type=str, help='Path to the Tensorflow checkpoint file containing model weights', defult = None)
 # parser.add_argument('--output_folder', type=str, help='Folder for the output data')
 # args = parser.parse_args()
+class args_placeholder:
+    def __init__(self):
+        self.model_config = 'asd'
+args = args_placeholder()
         
 comm = MPI.comm_world
 
@@ -41,7 +56,7 @@ rho = 1            # density
 mesh_file = "square_valid.h5"
 
 mesh = Mesh()
-
+mesh_npts = [100,100]
 try:
     with HDF5File(comm, mesh_file, "r") as h5file:
         h5file.read(mesh, "mesh", False)
@@ -50,7 +65,15 @@ try:
 except FileNotFoundError as fnf_error:
     print(fnf_error)
 
+mesh_indices = get_mesh_coordinate_indices(mesh, mesh_npts)
 
+# coords = mesh.coordinates()
+# plt.plot(coords[:,0],coords[:,1])
+# plt.savefig('/storage/fenics_cfd_test/coords.png', dpi = 400)
+# plt.figure()
+# indices = get_mesh_coordinate_indices(mesh, [100,100])
+# plt.plot(indices[:,0],indices[:,1])
+# plt.savefig('/storage/fenics_cfd_test/indices.png', dpi = 400)
 
 ExactU = Expression(('cos(x[0]) * sin(x[1])', '-sin(x[0]) * cos(x[1])'), degree = 1)
 
@@ -124,6 +147,11 @@ initial_condition_u = project(initial_condition_u, V)
 assign(u_n, initial_condition_u)
 assign(u_, initial_condition_u)
 
+# initial_condition_p = -rho * Expression('0.25 * (cos(2*x[0]) + cos(2*x[1]))', degree = 1)
+# initial_condition_p = project(initial_condition_p, Q)
+# assign(p_n, initial_condition_p)
+# assign(p_, initial_condition_p)
+
 
 # Create XDMF files for visualization output
 folder='/storage/fenics_cfd_test/'
@@ -154,8 +182,50 @@ for n in range(num_steps):
 
     # Step 2: Pressure correction step
     b2 = assemble(L2)
+    if args.model_config is not None:
+        rhs = tf.zeros(mesh_npts)
+        rhs = tf.tensor_scatter_nd_update(rhs, mesh_indices, np.array(b2))
+        fig = plt.imshow(rhs, origin='lower') 
+        plt.colorbar()
+        plt.savefig(folder + '/rhs.png')
+        plt.close()
+
+        rhsf = div(grad(p_n)) - (1/k)*div(u_)
+        rhsf_projected = project(rhsf, Q)
+        plot(rhsf_projected)
+        plt.savefig(folder + '/rhsf.png')
+        plt.close()
+
+        #validation code to test fenics -> tensorflow and tensorflow -> fenics works fine
+        myexpr = Expression('sin(x[0] + x[1])', degree = 1)
+        myexprf = project(myexpr, Q)
+        plot(myexprf)
+        plt.savefig(folder + '/zt.png')
+        plt.close()
+        z = tf.zeros(mesh_npts)
+        z = tf.tensor_scatter_nd_update(rhs, mesh_indices[:,::-1], np.array(myexprf.vector()))
+        fig = plt.imshow(z, origin='lower')
+        plt.colorbar()
+        plt.savefig(folder + '/z.png')
+        plt.close()
+        o = tf.gather_nd(z, mesh_indices)
+        myexprf.vector().set_local(o) 
+        plot(myexprf)
+        plt.savefig(folder + '/zr.png')
+        plt.close()
+        # 
+        # rhs = tf.reshape(rhs, [1,1] + mesh_npts)
+        # o = tf.reshape(rhs + 0.0, mesh_npts)
+        # o = tf.gather_nd(o, mesh_indices)
+        # bo = assemble(L2)
+        # bo.set_local(o)
+        
+    
     #[bc.apply(b2) for bc in bcp]
     solve(A2, p_.vector(), b2, 'bicgstab', 'hypre_amg')
+    if n > 50:
+        import pdb
+        pdb.set_trace()
     
     # Step 3: Velocity correction step
     b3 = assemble(L3)
