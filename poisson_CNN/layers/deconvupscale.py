@@ -96,7 +96,7 @@ class deconvupscale(tf.keras.layers.Layer):
         }
         return config
 
-    @tf.function
+    #@tf.function(experimental_relax_shapes=True)
     def call(self, inp):
         conv_inp, output_shape = inp
         

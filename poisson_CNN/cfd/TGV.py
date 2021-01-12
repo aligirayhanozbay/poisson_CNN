@@ -1,29 +1,32 @@
 from __future__ import print_function
 import argparse
+import os
+import json
 from fenics import *
 from mshr import *
 import numpy as np
 import matplotlib.pyplot as plt
-import tensorflow as tf
 from scipy.interpolate import RectBivariateSpline
+import tensorflow as tf
+import poisson_CNN
 
 parameters['reorder_dofs_serial']=False
 
-class GridInterpolantExpression(UserExpression):
-    def __init__(self, grid_values, domain_extent,**spline_options):
-        x = np.linspace(*domain_extent[0],grid_values.shape[-2])
-        y = np.linspace(*domain_extent[1],grid_values.shape[-1])
-        z = np.reshape(grid_values, [grid_values.shape[-2], grid_values.shape[-1]])
-        bbox = [x[0],x[-1],y[0],y[-1]]
-        self._spline = RectBivariateSpline(x,y,z,bbox=bbox,**spline_options)
+# class GridInterpolantExpression(UserExpression):
+#     def __init__(self, grid_values, domain_extent,**spline_options):
+#         x = np.linspace(*domain_extent[0],grid_values.shape[-2])
+#         y = np.linspace(*domain_extent[1],grid_values.shape[-1])
+#         z = np.reshape(grid_values, [grid_values.shape[-2], grid_values.shape[-1]])
+#         bbox = [x[0],x[-1],y[0],y[-1]]
+#         self._spline = RectBivariateSpline(x,y,z,bbox=bbox,**spline_options)
 
-        super().__init__()
+#         super().__init__()
 
-    def value_shape(self):
-        return tuple()
+#     def value_shape(self):
+#         return tuple()
 
-    def eval(self, value, x):
-        value[0] = self._spline(*x)
+#     def eval(self, value, x):
+#         value[0] = self._spline(*x)
 
 def get_mesh_coordinate_indices(mesh, npts):
     coords = mesh.coordinates().transpose((1,0))
@@ -34,15 +37,11 @@ def get_mesh_coordinate_indices(mesh, npts):
         )
     return np.stack(indices,-1)
 
-# parser = argparse.ArgumentParser(description = 'Run a Taylor-Green Vortex simulation using the projection method, with initial guesses to the pressure step linear solver provided by the Homogeneous Poisson NN model')
-# parser.add_argument('--model_config', type=str, help='Experiment JSON file containing the config of the HPNN model. If not provided, the program will be run without the NN.', default = None)
-# parser.add_argument('--model_checkpoint', type=str, help='Path to the Tensorflow checkpoint file containing model weights', defult = None)
-# parser.add_argument('--output_folder', type=str, help='Folder for the output data')
-# args = parser.parse_args()
-class args_placeholder:
-    def __init__(self):
-        self.model_config = 'asd'
-args = args_placeholder()
+parser = argparse.ArgumentParser(description = 'Run a Taylor-Green Vortex simulation using the projection method, with initial guesses to the pressure step linear solver provided by the Homogeneous Poisson NN model')
+parser.add_argument('--model_config', type=str, help='Experiment JSON file containing the config of the HPNN model. If not provided, the program will be run without the NN.', default = None)
+parser.add_argument('--model_checkpoint', type=str, help='Path to the Tensorflow checkpoint file containing model weights', default = None)
+parser.add_argument('--output_folder', type=str, help='Folder for the output data')
+args = parser.parse_args()
         
 comm = MPI.comm_world
 
@@ -53,7 +52,8 @@ mu = 6.25e-4         # dynamic viscosity
 rho = 1            # density
 
 
-mesh_file = "square_valid.h5"
+#mesh_file = "square_valid.h5"
+mesh_file = os.path.dirname(__file__) + "/square_valid.h5"
 
 mesh = Mesh()
 mesh_npts = [100,100]
@@ -66,6 +66,7 @@ except FileNotFoundError as fnf_error:
     print(fnf_error)
 
 mesh_indices = get_mesh_coordinate_indices(mesh, mesh_npts)
+grid_spacing = sorted(list(set(mesh.coordinates()[:,0][1:] - mesh.coordinates()[:,0][:-1])))[-1]
 
 # coords = mesh.coordinates()
 # plt.plot(coords[:,0],coords[:,1])
@@ -101,7 +102,7 @@ u_n = Function(V)
 u_  = Function(V)
 p_n = Function(Q)
 p_  = Function(Q)
-
+p_nn = Function(Q)
 # Define expressions used in variational forms
 U  = 0.5*(u_n + u)
 n  = FacetNormal(mesh)
@@ -147,12 +148,6 @@ initial_condition_u = project(initial_condition_u, V)
 assign(u_n, initial_condition_u)
 assign(u_, initial_condition_u)
 
-# initial_condition_p = -rho * Expression('0.25 * (cos(2*x[0]) + cos(2*x[1]))', degree = 1)
-# initial_condition_p = project(initial_condition_p, Q)
-# assign(p_n, initial_condition_p)
-# assign(p_, initial_condition_p)
-
-
 # Create XDMF files for visualization output
 folder='/storage/fenics_cfd_test/'
 xdmffile_u = XDMFFile(folder + '/velocity.xdmf')
@@ -165,6 +160,11 @@ timeseries_p = TimeSeries(folder + '/pressure_series')
 # Save mesh to file (for use in reaction_system.py)
 File(folder + '/cylinder.xml.gz') << mesh
 
+#load model
+model_config = poisson_CNN.convert_tf_object_names(json.load(open(args.model_config)))['model']
+model = poisson_CNN.models.Homogeneous_Poisson_NN_Legacy(**model_config)
+_ = model([tf.random.uniform((2,1,100,100)), tf.random.uniform((2,1))])
+model.load_weights(args.model_checkpoint)
 
 # Time-stepping
 t = 0
@@ -182,50 +182,37 @@ for n in range(num_steps):
 
     # Step 2: Pressure correction step
     b2 = assemble(L2)
-    if args.model_config is not None:
+    if args.model_config is not None and n > 50:
         rhs = tf.zeros(mesh_npts)
         rhs = tf.tensor_scatter_nd_update(rhs, mesh_indices, np.array(b2))
-        fig = plt.imshow(rhs, origin='lower') 
+        rhs_max_magnitude = tf.reduce_max(tf.abs(rhs))
+        rhs = tf.expand_dims(tf.expand_dims(rhs,0),0)/rhs_max_magnitude
+        dx = tf.constant([[grid_spacing]], tf.keras.backend.floatx())
+        nn_pred = -model([rhs, dx])[0,0]*(np.pi**2)
+        nn_pred = nn_pred/(tf.reduce_max(nn_pred) - tf.reduce_min(nn_pred)) - tf.reduce_min(nn_pred)
+        #p_nn.vector().set_local(tf.gather_nd(nn_pred, mesh_indices))
+        p_.vector().set_local(tf.gather_nd(nn_pred, mesh_indices))
+
+        fig = plt.imshow(rhs[0,0], origin='lower') 
         plt.colorbar()
         plt.savefig(folder + '/rhs.png')
         plt.close()
 
-        rhsf = div(grad(p_n)) - (1/k)*div(u_)
-        rhsf_projected = project(rhsf, Q)
-        plot(rhsf_projected)
-        plt.savefig(folder + '/rhsf.png')
+        fig = plt.imshow(nn_pred, origin='lower') 
+        plt.colorbar()
+        plt.savefig(folder + '/pred.png')
         plt.close()
 
-        #validation code to test fenics -> tensorflow and tensorflow -> fenics works fine
-        myexpr = Expression('sin(x[0] + x[1])', degree = 1)
-        myexprf = project(myexpr, Q)
-        plot(myexprf)
-        plt.savefig(folder + '/zt.png')
-        plt.close()
-        z = tf.zeros(mesh_npts)
-        z = tf.tensor_scatter_nd_update(rhs, mesh_indices[:,::-1], np.array(myexprf.vector()))
-        fig = plt.imshow(z, origin='lower')
-        plt.colorbar()
-        plt.savefig(folder + '/z.png')
-        plt.close()
-        o = tf.gather_nd(z, mesh_indices)
-        myexprf.vector().set_local(o) 
-        plot(myexprf)
-        plt.savefig(folder + '/zr.png')
-        plt.close()
-        # 
-        # rhs = tf.reshape(rhs, [1,1] + mesh_npts)
-        # o = tf.reshape(rhs + 0.0, mesh_npts)
-        # o = tf.gather_nd(o, mesh_indices)
-        # bo = assemble(L2)
-        # bo.set_local(o)
-        
+        # m_nn = project(div(grad(p_nn)),Q).vector() - b2
+        # print('L2 norm p NN: ' + str(np.sum(np.array(m_nn)**2)))
+    else:
+        solve(A2, p_.vector(), b2, 'bicgstab', 'hypre_amg')
     
-    #[bc.apply(b2) for bc in bcp]
-    solve(A2, p_.vector(), b2, 'bicgstab', 'hypre_amg')
-    if n > 50:
+    if n > 60:
         import pdb
         pdb.set_trace()
+    # m = project(div(grad(p_)),Q).vector() - b2
+    # print('L2 norm p amg: ' + str(np.sum(np.array(m)**2)))
     
     # Step 3: Velocity correction step
     b3 = assemble(L3)

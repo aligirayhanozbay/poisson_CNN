@@ -23,7 +23,15 @@ from tensorflow.keras import losses
 from tensorflow.keras.initializers import TruncatedNormal
 from tensorflow.keras.optimizers import Adam
 
-#import unet.metrics
+from ..layers import deconvupscale
+
+def _get_filter_count(layer_idx, filters_root):
+    return 2 ** layer_idx * filters_root
+
+
+def _get_kernel_initializer(filters, kernel_size):
+    stddev = np.sqrt(2 / (kernel_size ** 2 * filters))
+    return TruncatedNormal(stddev=stddev)
 
 
 class ConvBlock(layers.Layer):
@@ -121,35 +129,81 @@ class CropConcatBlock(layers.Layer):
         x1_shape = tf.shape(down_layer)
         x2_shape = tf.shape(x)
 
-        height_diff = (x1_shape[1] - x2_shape[1]) // 2
-        width_diff = (x1_shape[2] - x2_shape[2]) // 2
-
-        down_layer_cropped = down_layer[:,
+        if tf.keras.backend.image_data_format() == 'channels_last':
+            height_diff = (x1_shape[1] - x2_shape[1]) // 2
+            width_diff = (x1_shape[2] - x2_shape[2]) // 2
+            down_layer_cropped = down_layer[:,
                                         height_diff: (x1_shape[1] - height_diff),
                                         width_diff: (x1_shape[2] - width_diff),
-                                        :]
+                                            :]
+        else:
+            height_diff = (x1_shape[2] - x2_shape[2]) // 2
+            width_diff = (x1_shape[3] - x2_shape[3]) // 2
+            down_layer_cropped = down_layer[:,:,
+                                        height_diff: (x1_shape[2] - height_diff),
+                                        width_diff: (x1_shape[3] - width_diff)]
 
-        x = tf.concat([down_layer_cropped, x], axis=-1)
+        x = tf.concat([down_layer_cropped, x], axis=-1 if tf.keras.backend.image_data_format() == 'channels_last' else 1)
         return x
 
 
-def build_model(nx: Optional[int] = None,
-                ny: Optional[int] = None,
-                channels: int = 1,
-                num_classes: int = 2,
-                layer_depth: int = 5,
-                filters_root: int = 64,
-                kernel_size: int = 3,
-                pool_size: int = 2,
-                dropout_rate: int = 0.5,
-                padding:str="valid",
-                activation:Union[str, Callable]="relu") -> Model:
+
+
+class UNetModel(tf.keras.models.Model):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args,**kwargs)
+        self.data_format = tf.keras.backend.image_data_format()
+
+    # def call(self, inp):
+    #     print(inp.shape)
+    #     if self.data_format == 'channels_first':
+    #         inp = tf.transpose(inp, [0,2,3,1])
+    #         out = super().call(inp)
+    #         return tf.transpose(out, [0,3,1,2])
+    #     else:
+    #         return super().call(inp)
+        
+    def train_step(self, batch):
+        # import pdb
+        # pdb.set_trace()
+        inputs, ground_truth = batch
+
+        rhses, dx = inputs
+
+        with tf.GradientTape() as tape:
+            tape.watch(self.trainable_variables)
+            pred = self(rhses)
+            loss = self.loss_fn(y_true = ground_truth, y_pred = pred, rhs = rhses, dx = tf.concat([dx,dx],1))
+        # print(loss)
+        grads = tape.gradient(loss,self.trainable_variables)
+        grad_L2 = (tf.reduce_mean([tf.reduce_sum(x**2) for x in grads]))**0.5
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+        return {'loss' : loss, 'mse': tf.reduce_mean((pred - ground_truth)**2), 'grad L2 norm': grad_L2, 'lr': self.optimizer.learning_rate}
+    def compile(self, loss, optimizer):
+        super().compile()
+        self.optimizer = optimizer
+        self.loss_fn = loss
+
+def UNet(
+        nx: Optional[int] = None,
+        ny: Optional[int] = None,
+        in_channels: int = 1,
+        out_channels: int = 1,
+        layer_depth: int = 5,
+        filters_root: int = 64,
+        kernel_size: int = 3,
+        pool_size: int = 2,
+        dropout_rate: int = 0.5,
+        padding:str="valid",
+        activation:Union[str, Callable]="relu",
+        final_activation:Union[str,Callable]="linear") -> Model:
     """
     Constructs a U-Net model
     :param nx: (Optional) image size on x-axis
     :param ny: (Optional) image size on y-axis
-    :param channels: number of channels of the input tensors
-    :param num_classes: number of classes
+    :param in_channels: number of input channels of the input tensors
+    :param out_channels: number of channels of the output
     :param layer_depth: total depth of unet
     :param filters_root: number of filters in top unet layer
     :param kernel_size: size of convolutional layers
@@ -159,78 +213,8 @@ def build_model(nx: Optional[int] = None,
     :param activation: activation to be used
     :return: A TF Keras model
     """
-
-    inputs = Input(shape=(nx, ny, channels), name="inputs")
-
-    x = inputs
-    contracting_layers = {}
-
-    conv_params = dict(filters_root=filters_root,
-                       kernel_size=kernel_size,
-                       dropout_rate=dropout_rate,
-                       padding=padding,
-                       activation=activation)
-
-    for layer_idx in range(0, layer_depth - 1):
-        x = ConvBlock(layer_idx, **conv_params)(x)
-        contracting_layers[layer_idx] = x
-        x = layers.MaxPooling2D((pool_size, pool_size))(x)
-
-    x = ConvBlock(layer_idx + 1, **conv_params)(x)
-
-    for layer_idx in range(layer_idx, -1, -1):
-        x = UpconvBlock(layer_idx,
-                        filters_root,
-                        kernel_size,
-                        pool_size,
-                        padding,
-                        activation)(x)
-        x = CropConcatBlock()(x, contracting_layers[layer_idx])
-        x = ConvBlock(layer_idx, **conv_params)(x)
-
-    x = layers.Conv2D(filters=num_classes,
-                      kernel_size=(1, 1),
-                      kernel_initializer=_get_kernel_initializer(filters_root, kernel_size),
-                      strides=1,
-                      padding=padding)(x)
-
-    x = layers.Activation(activation)(x)
-    outputs = layers.Activation("softmax", name="outputs")(x)
-    model = Model(inputs, outputs, name="unet")
-
-    return model
-
-from ..layers import deconvupscale
-
-
-def build_model_modif(nx: Optional[int] = None,
-                ny: Optional[int] = None,
-                channels: int = 1,
-                num_classes: int = 2,
-                layer_depth: int = 5,
-                filters_root: int = 64,
-                kernel_size: int = 3,
-                pool_size: int = 2,
-                dropout_rate: int = 0.5,
-                padding:str="valid",
-                activation:Union[str, Callable]="relu") -> Model:
-    """
-    Constructs a U-Net model
-    :param nx: (Optional) image size on x-axis
-    :param ny: (Optional) image size on y-axis
-    :param channels: number of channels of the input tensors
-    :param num_classes: number of classes
-    :param layer_depth: total depth of unet
-    :param filters_root: number of filters in top unet layer
-    :param kernel_size: size of convolutional layers
-    :param pool_size: size of maxplool layers
-    :param dropout_rate: rate of dropout
-    :param padding: padding to be used in convolutions
-    :param activation: activation to be used
-    :return: A TF Keras model
-    """
-
-    inputs = Input(shape=(nx, ny, channels), name="inputs")
+    inpshape = (nx, ny, in_channels) if tf.keras.backend.image_data_format() == 'channels_last' else (in_channels,nx,ny)
+    inputs = Input(shape=inpshape, name="inputs")
 
     x = inputs
     contracting_layers = {}
@@ -247,7 +231,7 @@ def build_model_modif(nx: Optional[int] = None,
         contracting_layers[layer_idx] = x
         shr = tf.keras.layers.Lambda(lambda x: tf.shape(x), output_shape = (4,))(x)
         shrs[layer_idx] = shr
-        x = layers.MaxPooling2D((pool_size, pool_size), padding = 'same')(x)
+        x = layers.MaxPooling2D((pool_size, pool_size), padding = 'same', data_format = tf.keras.backend.image_data_format())(x)
         
 
     x = ConvBlock(layer_idx + 1, **conv_params)(x)
@@ -273,79 +257,73 @@ def build_model_modif(nx: Optional[int] = None,
         x = CropConcatBlock()(x, contracting_layers[layer_idx])
         x = ConvBlock(layer_idx, **conv_params)(x)
 
-    x = layers.Conv2D(filters=num_classes,
+    x = layers.Conv2D(filters=out_channels,
                       kernel_size=(1, 1),
                       kernel_initializer=_get_kernel_initializer(filters_root, kernel_size),
                       strides=1,
                       padding=padding)(x)
 
     x = layers.Activation(activation)(x)
-    outputs = layers.Activation("softmax", name="outputs")(x)
-    model = Model(inputs, outputs, name="unet")
+    outputs = layers.Activation(final_activation, name="outputs")(x)
+    model = UNetModel(inputs, outputs, name="unet")
 
     return model
 
 
-def _get_filter_count(layer_idx, filters_root):
-    return 2 ** layer_idx * filters_root
 
+# def finalize_model(model: Model,
+#                    loss: Optional[Union[Callable, str]]=losses.categorical_crossentropy,
+#                    optimizer: Optional= None,
+#                    metrics:Optional[List[Union[Callable,str]]]=None,
+#                    dice_coefficient: bool=True,
+#                    auc: bool=True,
+#                    mean_iou: bool=True,
+#                    **opt_kwargs):
+#     """
+#     Configures the model for training by setting, loss, optimzer, and tracked metrics
+#     :param model: the model to compile
+#     :param loss: the loss to be optimized. Defaults to `categorical_crossentropy`
+#     :param optimizer: the optimizer to use. Defaults to `Adam`
+#     :param metrics: List of metrics to track. Is extended by `crossentropy` and `accuracy`
+#     :param dice_coefficient: Flag if the dice coefficient metric should be tracked
+#     :param auc: Flag if the area under the curve metric should be tracked
+#     :param mean_iou: Flag if the mean over intersection over union metric should be tracked
+#     :param opt_kwargs: key word arguments passed to default optimizer (Adam), e.g. learning rate
+#     """
 
-def _get_kernel_initializer(filters, kernel_size):
-    stddev = np.sqrt(2 / (kernel_size ** 2 * filters))
-    return TruncatedNormal(stddev=stddev)
+#     if optimizer is None:
+#         optimizer = Adam(**opt_kwargs)
 
+#     if metrics is None:
+#         metrics = ['categorical_crossentropy',
+#                    'categorical_accuracy',
+#                    ]
 
-def finalize_model(model: Model,
-                   loss: Optional[Union[Callable, str]]=losses.categorical_crossentropy,
-                   optimizer: Optional= None,
-                   metrics:Optional[List[Union[Callable,str]]]=None,
-                   dice_coefficient: bool=True,
-                   auc: bool=True,
-                   mean_iou: bool=True,
-                   **opt_kwargs):
-    """
-    Configures the model for training by setting, loss, optimzer, and tracked metrics
-    :param model: the model to compile
-    :param loss: the loss to be optimized. Defaults to `categorical_crossentropy`
-    :param optimizer: the optimizer to use. Defaults to `Adam`
-    :param metrics: List of metrics to track. Is extended by `crossentropy` and `accuracy`
-    :param dice_coefficient: Flag if the dice coefficient metric should be tracked
-    :param auc: Flag if the area under the curve metric should be tracked
-    :param mean_iou: Flag if the mean over intersection over union metric should be tracked
-    :param opt_kwargs: key word arguments passed to default optimizer (Adam), e.g. learning rate
-    """
+#     if mean_iou:
+#         metrics += [unet.metrics.mean_iou]
 
-    if optimizer is None:
-        optimizer = Adam(**opt_kwargs)
+#     if dice_coefficient:
+#         metrics += [unet.metrics.dice_coefficient]
 
-    if metrics is None:
-        metrics = ['categorical_crossentropy',
-                   'categorical_accuracy',
-                   ]
+#     if auc:
+#         metrics += [tf.keras.metrics.AUC()]
 
-    if mean_iou:
-        metrics += [unet.metrics.mean_iou]
-
-    if dice_coefficient:
-        metrics += [unet.metrics.dice_coefficient]
-
-    if auc:
-        metrics += [tf.keras.metrics.AUC()]
-
-    model.compile(loss=loss,
-                  optimizer=optimizer,
-                  metrics=metrics,
-                  )
+#     model.compile(loss=loss,
+#                   optimizer=optimizer,
+#                   metrics=metrics,
+#                   )
 
 if __name__=='__main__':
-    z = build_model(channels = 1, nx = 96, ny = 96, layer_depth = 3, padding='same')
-    z.summary()
-    z = build_model_modif(channels = 1, nx = None, ny = None, layer_depth = 3, padding='same')
+    tf.config.run_functions_eagerly(True)
+    tf.keras.backend.set_image_data_format('channels_first')
+    z = UNet(in_channels = 1, nx = None, ny = None, layer_depth = 4, padding='same')
     z.summary()
     for nx in range(97,105):
         print('=====')
-        m = tf.random.uniform((10,nx,nx,1))
+        dshape = (10,nx,nx,1) if tf.keras.backend.image_data_format() == 'channels_last' else (10,1,nx,nx)
+        m = tf.random.uniform(dshape)
         print(z(m).shape)
     z.summary()
+    res = z(m)
     import pdb
     pdb.set_trace()
