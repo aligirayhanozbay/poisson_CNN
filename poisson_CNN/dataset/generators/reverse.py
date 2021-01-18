@@ -197,7 +197,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
         
         return tf.expand_dims(solns,1), coeffs, grid_spacings
         
-    @tf.function
+    @tf.function(experimental_relax_shapes = True)
     def generate_rhses_fourier(self, coefficients, grid_size, grid_spacings):
         #adjust coefficients from generate_soln_fourier to get RHS coefficients
         domain_sizes = tf.einsum('ij,j->ij',grid_spacings,tf.cast(grid_size,tf.keras.backend.floatx()))
@@ -222,12 +222,12 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
 
         return rhs, domain_sizes
 
-    @tf.function
+    @tf.function(experimental_relax_shapes = True)
     def build_taylor_rhs_component(self, vals, indices):
         vals = [vals[k][indices[k]] for k in range(self.ndims)]
         return tf.einsum(self.taylor_einsum_str,*vals)
         
-    @tf.function
+    @tf.function(experimental_relax_shapes = True)
     def generate_soln_and_rhs_taylor(self, grid_size, domain_sizes):
         #generate polynomials and their 2nd derivatives along each direction
         polynomials = []
@@ -295,7 +295,7 @@ class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
             solns = tf.einsum('i...,i->i...',solns,max_domain_size_squared_soln_scaling_factors)
         return rhses, solns
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def set_taylor_result_peak_magnitude_to_fourier_peak_magnitude(self, rhses_fourier, rhses_taylor, solns_taylor):
         rhses_taylor_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_taylor)#scale taylor series component to that the max magnitude is identical to the fourier series component
         rhses_fourier_max = tf.map_fn(lambda x: tf.reduce_max(tf.abs(x)),rhses_fourier)
