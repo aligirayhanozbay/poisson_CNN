@@ -20,10 +20,8 @@ setuptools.setup(
         "Topic :: Scientific/Engineering"
     ],
     install_requires=[
-        "numpy",
-        "tf-nightly",
-	"tfp-nightly",
-        "opt-einsum",
+        "tensorflow",
+	"tensorflow-probability",
 	"pyamg"
     ],
     python_requires='>=3.6'
