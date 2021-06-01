@@ -1,0 +1,52 @@
+{
+    "model":{
+	"in_channels": 1,
+	"out_channels": 1,
+	"nx": null,
+	"ny": null,
+	"layer_depth": 4,
+	"final_activation": "linear",
+	"padding": "same"
+    },
+    "dataset":{
+	"batch_size":50,
+	"batches_per_epoch":200,
+	"random_output_shape_range": [[192,384],[192,384]],
+	"fourier_coeff_grid_size_range": [[1,8],[1,8]],
+	"taylor_degree_range": [[2,6],[2,6]],
+	"grid_spacings_range": [5e-3,5e-2],
+	"homogeneous_bc": true,
+	"return_rhses": true,
+	"return_boundaries": false,
+	"return_dx": true,
+	"normalizations": {"rhs_max_magnitude": true, "max_domain_size_squared": true},
+	"uniform_grid_spacing": true
+    },
+    "training":{
+	"n_epochs": 200,
+	"precision": "float32",
+	"optimizer": "adam",
+	"optimizer_parameters":{
+	    "learning_rate": 1e-4,
+	    "amsgrad": false
+	},
+	"min_learning_rate": 1e-7,
+	"loss_parameters":{
+	    "ndims":2,
+	    "data_format":"channels_first",
+	    "mae_loss_weight": 1e+0,
+	    "integral_loss_weight": 0.0,
+	    "integral_loss_config":{
+		"n_quadpts": 47,
+		"Lp_norm_power":2
+	    },
+	    "physics_informed_loss_weight":0.0,
+	    "physics_informed_loss_config":{
+		"stencil_sizes":[5,5],
+		"orders":2,
+		"normalize":false
+	    },
+	    "scale_sample_loss_by_target_peak_magnitude": true
+	}
+    }
+}

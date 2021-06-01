@@ -6,3 +6,4 @@ weights/
 build/
 dist/
 poisson_CNN.egg-info/
+*.json~

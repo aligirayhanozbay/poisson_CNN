@@ -4,7 +4,7 @@ tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 from .utils import choose_optimizer, load_model_checkpoint
 from ..utils import convert_tf_object_names
-from ..models import Dirichlet_BC_NN_Legacy_2
+from ..models import Dirichlet_BC_RNN
 from ..losses import loss_wrapper
 from ..dataset.generators import numerical_dataset_generator
 
@@ -28,7 +28,7 @@ dataset = numerical_dataset_generator(randomize_boundary_smoothness = True, excl
 dist_strategy = tf.distribute.MirroredStrategy(cross_device_ops=tf.distribute.ReductionToOneDevice())#nccl causes errors on POWER9
 
 with dist_strategy.scope():
-    model = Dirichlet_BC_NN_Legacy_2(**config['model'])
+    model = Dirichlet_BC_RNN(**config['model'])
     optimizer = choose_optimizer(config['training']['optimizer'])(**config['training']['optimizer_parameters'])
     loss = loss_wrapper(**config['training']['loss_parameters'])
     
