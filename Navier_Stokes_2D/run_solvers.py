@@ -377,6 +377,7 @@ def run_Navier_Stokes_solver(xl, xr, t0, tf, gridsize, method, test_problem_name
 		return Velocity_error, Pressure_error, avg_gradp_error, mesh.dt
 
 if __name__ == "__main__":
+	print('WARNING: At the moment, this simulation code uses hard coded file paths in the solvers.py file and the usage of the model is commented out (line 250 thereabouts). Change these to use this script properly!')
 	inputs = get_inputs()
 	if type(inputs[4]) == bool:
 		xl, xr, t0, tf, gridsize, method, test_problem_name, CFL, Re, Niter = inputs
