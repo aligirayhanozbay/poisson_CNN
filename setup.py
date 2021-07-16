@@ -22,7 +22,8 @@ setuptools.setup(
     install_requires=[
         "tensorflow",
 	"tensorflow-probability",
-	"pyamg"
+	"pyamg",
+	"scipy"    
     ],
     python_requires='>=3.6'
 )
