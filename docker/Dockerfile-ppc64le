@@ -14,6 +14,6 @@ RUN cd /poisson_CNN && pip3 install --no-deps -e .
 #amgx for GPU accelerated multigrid
 RUN cd / && git clone https://github.com/NVIDIA/AMGX
 RUN mkdir /AMGX/build
-RUN cd /AMGX/build && cmake ../ && make -j160 all
+RUN cd /AMGX/build && cmake ../ && make -j all
 RUN cd / && git clone https://github.com/shwina/pyamgx && cd pyamgx && export AMGX_DIR=/AMGX/ && pip3 install cython && pip3 install .
 ENV AMGX_DIR=/AMGX/
