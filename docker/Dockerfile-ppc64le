@@ -1,0 +1,19 @@
+FROM ibmcom/tensorflow-ppc64le:latest-gpu-py3-jupyter
+
+SHELL ["/bin/bash", "-c"]
+
+#cuda version, tf-probability for interpolation
+RUN apt update && apt install -y --no-install-recommends git wget cmake openmpi-bin libopenmpi-dev openjdk-11-jdk libcublas-dev=10.1.0.105-1 cuda-cusparse-dev-10-1 cuda-cusolver-dev-10-1 cuda-curand-dev-10-1
+RUN wget -O /usr/bin/bazel https://oplab9.parqtec.unicamp.br/pub/ppc64el/bazel/ubuntu_18.04/bazel_bin_ppc64le_3.4.1 && chmod +x /usr/bin/bazel
+RUN pip3 install tensorflow-probability==0.11.1 pyamg
+
+#poisson_CNN package
+RUN cd / && git clone https://github.com/aligirayhanozbay/poisson_CNN.git
+RUN cd /poisson_CNN && pip3 install --no-deps -e . 
+
+#amgx for GPU accelerated multigrid
+RUN cd / && git clone https://github.com/NVIDIA/AMGX
+RUN mkdir /AMGX/build
+RUN cd /AMGX/build && cmake ../ && make -j all
+RUN cd / && git clone https://github.com/shwina/pyamgx && cd pyamgx && export AMGX_DIR=/AMGX/ && pip3 install cython && pip3 install .
+ENV AMGX_DIR=/AMGX/

@@ -5,60 +5,97 @@ import copy
 import itertools
 from collections.abc import Iterator
 
+try:
+    import pyamgx
+except:
+    print('Could not import pyamgx.')
+
 from .cholesky import poisson_RHS
 
-# def poisson_RHS(F, boundaries = None, h = None, rho = None): #Currently unused method to handle Poisson systems where BC mesh nodes are included in the LHS vector
-#     boundaries = copy.deepcopy(boundaries)
-    
-#     rhs = np.zeros(F.shape)#np.zeros(list(F.shape[:-2]) + [np.prod(F.shape[-2:])])
-      
-#     for key in boundaries.keys():
-#         if len(boundaries[key].shape) > 1:
-#             boundaries[key] = tf.squeeze(boundaries[key])
-#         if len(boundaries[key].shape) == 1:
-#             boundaries[key] = itertools.repeat(boundaries[key], F.shape[0])
-    
-#     if (h is not None) and isinstance(h, float):
-#         h = itertools.repeat(h, F.shape[0])
-      
-#     for i in range(F.shape[0]):
-#         if h is not None:
-#             try:
-#                 dx = next(h)
-#             except:
-#                 dx = h[i]
-#             F[i] = -dx**2 * F[i]
-      
-#         if isinstance(boundaries['top'], Iterator):
-#             top = next(boundaries['top'])
-#         else:
-#             top = boundaries['top'][i]
-            
-#         if isinstance(boundaries['bottom'], Iterator):
-#             bottom = next(boundaries['bottom'])
-#         else:
-#             bottom = boundaries['bottom'][i]
-            
-#         if isinstance(boundaries['left'], Iterator):
-#             left = next(boundaries['left'])
-#         else:
-#             left = boundaries['left'][i]
-            
-#         if isinstance(boundaries['right'], Iterator):
-#             right = next(boundaries['right'])
-#         else:
-#             right = boundaries['right'][i]
-        
-      
-#         rhs[i,...,0] = bottom
-#         rhs[i,...,-1] = top
-#         rhs[i,...,0,:] = left
-#         rhs[i,...,-1,:] = right
-#         rhs[i,...,1:-1,1:-1] = F[i,...,1:-1,1:-1]
-      
-#     return rhs.reshape(list(rhs.shape[:-2]) + [np.prod(rhs.shape[-2:])])
+def get_default_pyamgx_config():
+    #default config copied directly from https://github.com/NVIDIA/AMGX/blob/master/core/configs/AMG_CLASSICAL_CG.json
+    config = {
+                "config_version": 2, 
+                "solver": {
+                    "print_grid_stats": 1, 
+                    "solver": "AMG", 
+                    "print_solve_stats": 1, 
+                    "presweeps": 1, 
+                    "obtain_timings": 1, 
+                    "max_iters": 1, 
+                    "monitor_residual": 1, 
+                    "convergence": "ABSOLUTE", 
+                    "scope": "main", 
+                    "max_levels": 100, 
+                    "cycle": "CG", 
+                    "tolerance": 1e-06, 
+                    "norm": "L2", 
+                    "postsweeps": 1
+                }
+            }
+    return config
 
-def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = None, tol = 1e-10):
+def pyamgx_solve(A, b, config = None, x0 = None):
+    '''
+    Uses the (experimental) pyamgx Python bindings to the Nvidia AMGX library to solve the system Ax=b on the GPU using multigrid.
+
+    A: CSR format sparse matrix
+    b: numpy array
+    config: AMGX config. See AMGX github for details.
+    x0: numpy array. Initial guess for the mgrid algorithm.
+
+    Outputs a numpy array containing the solution to the equation system.
+    '''
+    pyamgx.initialize()
+    #pyamgx.register_print_callback(lambda msg: print(''))
+    try:#try-except block to call pyamgx.finalize() in the case an error occurs - subsequent calls with good inputs will fail otherwise
+        if config is None:
+            #default config copied directly from https://github.com/NVIDIA/AMGX/blob/master/core/configs/AMG_CLASSICAL_CG.json
+            config = get_default_pyamgx_config()
+            config = pyamgx.Config().create_from_dict(config)
+        elif isinstance(config, dict):
+            config = pyamgx.Config().create_from_dict(config)
+
+        resources = pyamgx.Resources()
+        resources.create_simple(config)
+        #Allocate memory for variables on GPU
+        A_pyamgx = pyamgx.Matrix()
+        A_pyamgx.create(resources, mode='dDDI')
+        A_pyamgx.upload_CSR(A)
+    
+        if not isinstance(b,np.ndarray):
+            b = np.array(b)
+        b = b.astype(np.float64)
+        b_pyamgx = pyamgx.Vector()
+        b_pyamgx.create(resources, mode='dDDI')
+        b_pyamgx.upload(b)
+
+        x = pyamgx.Vector().create(resources)
+        x0 = x0 if x0 is not None else np.zeros(b.shape,dtype=b.dtype)
+        x.upload(x0)
+        #Solve system
+        solver = pyamgx.Solver()
+        solver.create(resources, config)
+        solver.setup(A_pyamgx)
+        solver.solve(b_pyamgx, x)
+        rval = x.download()
+        print(solver.get_residual())
+        #Cleanup to prevent GPU memory leak
+        solver.destroy()
+        A_pyamgx.destroy()
+        b_pyamgx.destroy()
+        x.destroy()
+        resources.destroy()
+        config.destroy()
+        pyamgx.finalize()
+    
+        return rval
+    
+    except:
+        pyamgx.finalize()
+        raise(RuntimeError('pyamgx variable creation or solver error. See stack trace.'))
+
+def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = None, tol = 1e-10, solver_init_parameters = {}, solver_run_parameters = {}, use_pyamgx = False, initial_guesses = None):
     '''
     Solves the Poisson equation for the given RHSes.
     
@@ -66,11 +103,13 @@ def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = No
     boundaries: boundary conditions of the outputs; see poisson_RHS documentation
     dx: grid spacing of the outputs
     system_matrix: Sparse Poisson equation system matrix. Generated by pyamg.gallery.poisson
-    tol: Tolerance of the multigrid solver.
+    tol: Tolerance of the multigrid solver. If use_pyamgx is True and a tolerance is set in solver_init_parameters, the value in solver_init_parameters takes precedence.
+    solver_init_parameters: If use_pyamgx is False, a dict of optional parameters to pass to pyamg.classical.ruge_stuben_solver. If use_pyamgx is True, a dict of parameters to pass to pyamgx.Config(), or a pyamgx.Config object itself.
+    solver_run_parameters: runtime parameters for the pyamg.multilevel_solver.solve method bound to the pyamg.multilevel_solver object created by pyamg.classical.ruge_stuben_solver. No effect if use_pyamgx is True. 
+    use_pyamgx: if the pyamgx python interface package to the NVIDIA AMGX library is available, set to True to use the GPU to solve the equation system. (Otherwise works on the CPU)
+    initial_guesses: numpy array, same shape as rhses. Initial guess for the mgrid algorithm.
     
     Outputs a tf.Tensor of identical shape to rhses.
-    
-    This function works on CPU.
     '''
     try:
         rhses = rhses.numpy()
@@ -85,13 +124,23 @@ def multigrid_poisson_solve(rhses, boundaries, dx, dy = None, system_matrix = No
 
     if system_matrix == None:
         system_matrix = pyamg.gallery.poisson([dim-2 for dim in rhses.shape[1:]], format = 'csr')
-    solver = pyamg.ruge_stuben_solver(system_matrix)
 
     interior_slice = [0, Ellipsis] + [slice(1,-1) for k in rhses.shape[1:]]
-        
-    for k in range(rhses.shape[0]):
-        interior_slice[0] = k
-        solns[interior_slice] = solver.solve(np.squeeze(rhs_vectors[k,...]), tol = tol).reshape([dim-2 for dim in rhses.shape[1:]], order = 'c')
+    
+    if use_pyamgx:
+        #solver_init_parameters = {**{"tolerance":tol}, **solver_init_parameters}
+        for k in range(rhses.shape[0]):
+            interior_slice[0] = k
+            sample_guess = initial_guesses[tuple(interior_slice)].reshape(rhs_vectors.shape[1:]) if initial_guesses is not None else None
+            solns[tuple(interior_slice)] = pyamgx_solve(system_matrix, rhs_vectors[k,...], config = solver_init_parameters, x0 = sample_guess).reshape([dim-2 for dim in rhses.shape[1:]], order = 'c')
+
+    else:
+        solver = pyamg.ruge_stuben_solver(system_matrix, **solver_init_parameters)
+        initial_guesses = solver_run_parameters.pop('x0', initial_guesses)
+        for k in range(rhses.shape[0]):
+            interior_slice[0] = k
+            sample_guess = initial_guesses[tuple(interior_slice)].reshape(rhs_vectors.shape[1:]) if initial_guesses is not None else None
+            solns[tuple(interior_slice)] = solver.solve(np.squeeze(rhs_vectors[k,...]), x0 = sample_guess, tol = tol, **solver_run_parameters).reshape([dim-2 for dim in rhses.shape[1:]], order = 'c')
 
     solns[...,:,-1] = boundaries['top']
     solns[...,:,0] = boundaries['bottom']

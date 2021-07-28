@@ -1,0 +1,44 @@
+{
+    "model":{
+	"data_format": "channels_first",
+	"activations": "tanh",
+	"units": [100,100,100,100,100,100],
+	"resize_method": "bilinear",
+	"RNN_type": "lstm"
+    },
+    "dataset":{
+	"batch_size": 50,
+	"batches_per_epoch": 200,
+	"random_output_shape_range": [[192,384],[192,384]],
+	"random_dx_range": [5e-3,5e-2],
+	"solver_method": "multigrid",
+	"boundary_random_smoothness_range": {"left": [3,8], "right": [3,8], "top": [3,8], "bottom": [3,8]}
+    },
+    "training":{
+	"n_epochs": 200,
+	"precision": "float32",
+	"optimizer": "adam",
+	"optimizer_parameters":{
+	    "learning_rate": 1e-4,
+	    "amsgrad": false
+	},
+	"min_learning_rate": 1e-7,
+	"loss_parameters":{
+	    "ndims":2,
+	    "data_format":"channels_first",
+	    "mae_loss_weight": 1e+0,
+	    "integral_loss_weight": 0.4,
+	    "integral_loss_config":{
+		"n_quadpts": 47,
+		"Lp_norm_power":2
+	    },
+	    "physics_informed_loss_weight":0.0,
+	    "physics_informed_loss_config":{
+		"stencil_sizes":[5,5],
+		"orders":2,
+		"normalize":false
+	    },
+	    "scale_sample_loss_by_target_peak_magnitude": false
+	}
+    }
+}

@@ -1,11 +1,11 @@
 import setuptools
 
-with open("README.md", "r") as fh:
+with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
     name="poisson_CNN",
-    version="0.2.1",
+    version="0.3.0",
     author="Ali Girayhan Ozbay",
     author_email="aligirayhan.ozbay14@imperial.ac.uk",
     description="A convolutional neural network based Poisson solver",
@@ -20,10 +20,10 @@ setuptools.setup(
         "Topic :: Scientific/Engineering"
     ],
     install_requires=[
-        "numpy",
-        "opt-einsum",
-        "tensorflow-gpu>=2.0.0",
-	"pyamg"
+        "tensorflow",
+	"tensorflow-probability",
+	"pyamg",
+	"scipy"    
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.6'
 )

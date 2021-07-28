@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-import itertools, h5py
+import itertools
 import opt_einsum as oe
 from multiprocessing import Pool as ThreadPool
 

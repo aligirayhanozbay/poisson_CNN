@@ -1,0 +1,107 @@
+{
+    "model":{
+	"bc_type": "neumann",
+	"use_batchnorm": true,
+	"use_scaling": true,
+	"data_format":"channels_first",
+	"postsmoother_iterations": 0,
+	"pre_bottleneck_convolutions_config":{
+	    "filters": [4,16,32],
+	    "kernel_sizes": [15,13,11],
+            "padding_mode": "symmetric",
+            "activation": "tf.nn.leaky_relu",
+            "use_bias": true,
+            "bias_initializer":"zeros"
+	},
+	"bottleneck_deconv_config":{
+	    "downsampling_factors": [2,3,4,8,16],
+            "upsampling_factors": [2,3,4,8,16],
+            "filters": 32,
+            "conv_kernel_sizes": [11,9,7,7,7,5],
+	    "deconv_kernel_sizes": [2,3,4,8,16],
+            "n_convs": [3,3,3,3,3,3],
+            "padding_mode": "SYMMETRIC",
+            "conv_activation": "tf.nn.leaky_relu",
+            "conv_use_bias": true,
+            "use_resnet": true,
+	    "pool_downsampling_method":"average",
+            "downsampling_method": "pool"
+	},
+	"bottleneck_multilinear_config":{
+	    "downsampling_factors": [32,64,128],
+            "upsampling_factors": [32,64,128],
+            "filters": 32,
+            "conv_kernel_sizes": [5,5,5],
+            "n_convs": [3,3,3],
+            "padding_mode": "CONSTANT",
+	    "constant_padding_value": 0.0,
+            "conv_activation": "tf.nn.leaky_relu",
+            "conv_use_bias": true,
+            "use_resnet": true,
+            "downsampling_method": "pool",
+            "pool_downsampling_method": "average",
+	    "resize_methods": ["bicubic","bilinear","nearest"]
+	},
+	"final_convolutions_config":{
+	    "filters": [32,28,24,20,16,12,8,4,1],
+            "kernel_sizes": [15,13,9,7,5,3,3,3,3],
+            "padding_mode": "CONSTANT",
+            "constant_padding_value": 0.0,
+            "activation": "tf.nn.leaky_relu",
+            "use_bias": true,
+            "bias_initializer":"zeros"
+	},
+	"scaling_config":{
+	    "downsampling_ratio_per_stage":3,
+	    "stages":3,
+	    "filters":4,
+	    "spp_levels":[[2,2],3,5],
+	    "activation": "tf.nn.leaky_relu",
+	    "kernel_size": 3
+	}
+    },
+    "dataset":{
+	"batch_size":50,
+	"batches_per_epoch":200,
+	"random_output_shape_range": [[192,384],[192,384]],
+	"fourier_coeff_grid_size_range": [[1,8],[1,8]],
+	"grid_spacings_range": [5e-3,5e-2],
+	"return_rhses": true,
+	"return_dx": true,
+	"normalizations": {"rhs_max_magnitude": true, "max_domain_size_squared": true},
+	"uniform_grid_spacing": true
+    },
+    "training":{
+	"n_epochs": 200,
+	"precision": "float32",
+	"optimizer": "adam",
+	"optimizer_parameters":{
+	    "learning_rate": 1e-5,
+	    "amsgrad": false
+	},
+	"min_learning_rate": 1e-7,
+	"loss_parameters":{
+	    "ndims":2,
+	    "data_format":"channels_first",
+	    "mae_loss_weight": 1e+0,
+	    "integral_loss_weight": 0.4,
+	    "integral_loss_config":{
+		"n_quadpts": 47,
+		"Lp_norm_power":2
+	    },
+	    "physics_informed_loss_weight":6e-4,
+	    "physics_informed_loss_config":{
+		"stencil_sizes":[5,5],
+		"orders":2,
+		"normalize":false,
+		"inputs_have_max_domain_size_squared_normalization": true
+	    },
+	    "scale_sample_loss_by_target_peak_magnitude": true
+	}
+    }
+
+
+
+
+
+}
