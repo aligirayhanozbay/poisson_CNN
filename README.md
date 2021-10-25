@@ -1,4 +1,5 @@
 # poisson_CNN
+[![PyPI version](https://badge.fury.io/py/poisson-CNN.svg)](https://badge.fury.io/py/poisson-CNN)
 
 poisson_CNN is a convolutional neural network model whih estimates the solution of the Poisson equation with four Dirichlet boundary conditions on rectangular grids of variable sizes.
 
