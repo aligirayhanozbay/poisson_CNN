@@ -1,13 +1,13 @@
 ##poisson_CNN docker image for Nvidia GPUs on amd64 platforms
-FROM nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
+FROM nvidia/cuda:11.0.3-cudnn8-devel-ubuntu18.04
 
 RUN apt update && apt install -y git cmake openmpi-bin libopenmpi-dev python3 python3-pip wget
 
 RUN cd /
 RUN pip3 install --upgrade pip
 RUN pip3 install jupyterlab			\
-    	 	 tensorflow-gpu==2.3		\
-		 tensorflow-probability==0.11.1	\
+    	 	 tensorflow-gpu==2.4		\
+		 tensorflow-probability==0.12.2	\
 		 matplotlib			\
 		 scipy				\
 		 cython				\
