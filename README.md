@@ -1,7 +1,7 @@
 # poisson_CNN
 [![PyPI version](https://badge.fury.io/py/poisson-CNN.svg)](https://badge.fury.io/py/poisson-CNN)
 
-poisson_CNN is a convolutional neural network model whih estimates the solution of the Poisson equation with four Dirichlet boundary conditions on rectangular grids of variable sizes.
+poisson_CNN is a convolutional neural network model which estimates the solution of the Poisson equation with four Dirichlet or Neumann boundary conditions on rectangular grids of variable sizes.
 
 Installation requires CUDA set up to work with tensorflow-gpu version 2.3 or newer. To install, please use the Dockerfile appropriate for your CPU architecture (in most cases, `docker/Dockerfile-amd64`)
 
