@@ -101,7 +101,7 @@ def polynomials_and_their_2nd_derivatives(npts, poly_deg, domain_sizes, batch_si
 class reverse_poisson_dataset_generator(tf.keras.utils.Sequence):
     def __init__(self, batch_size, batches_per_epoch, random_output_shape_range, fourier_coeff_grid_size_range, taylor_degree_range, grid_spacings_range = None, ndims = None, homogeneous_bc = False, return_rhses = True, return_boundaries = True, return_dx = True, normalizations = None, uniform_grid_spacing = False):
         '''
-        Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution and then using finite difference schemes to generate the RHS. Smooth results are ensured by using a Fourier series approach.
+        Generates batches of random Poisson equation RHS-BC-solutions by first generating a solution using fourier and taylor series, and then computing the RHS analytically.
 
         Inputs:
         -batch_size: int. Number of samples to generate each time __getitem__ is called
